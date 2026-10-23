@@ -1,7 +1,7 @@
 --[[--
 Renderiza o painel e o overlay do plugin para imagens, fora do Kindle.
 
-    luajit tools/harness/render.lua estado.json saida.pgm [escala] [hora]
+    luajit tools/harness/render.lua estado.json saida.pgm [escala] [hora] [data] [pt|en]
     luajit tools/harness/render.lua --overlay saida.pgm [celula]
 
 Usado para conferir o desenho contra o original e gerar as imagens do README.
@@ -10,9 +10,11 @@ local H = dofile((debug.getinfo(1, "S").source:sub(2):match("(.*/)") or "./") ..
 local D = require("claudinho/desenho")
 local E = require("claudinho/estado")
 local json = require("claudinho/json")
+local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
 local args = { ... }
+L.escolher(args[6] or "pt")
 
 if args[1] == "--overlay" then
     local cel = tonumber(args[3]) or 2

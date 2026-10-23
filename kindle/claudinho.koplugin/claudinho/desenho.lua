@@ -9,6 +9,8 @@ Este modulo nao conhece a tela nem o KOReader: recebe o Blitbuffer, o
 RenderText e uma funcao que devolve fontes. Assim da para testar fora do Kindle.
 ]]
 
+local L = require("claudinho/textos")
+
 local D = {}
 D.__index = D
 
@@ -281,7 +283,10 @@ function D:painel(bb, v, data, hora, quadro)
     self:relogio(bb, hora)
 
     -- painel de dados (branco)
-    self:texto(bb, 330, 30, "NO FOGO AGORA", "mono700", 12, c.c444, 16, 12 * 0.16)
+    self:texto(bb, 330, 30, L.t("painel_no_fogo"), "mono700", 12, c.c444, 16, 12 * 0.16)
+    if (v.agentes or "") ~= "" then
+        self:texto(bb, 770, 30, v.agentes, "mono700", 12, c.c444, 16, 12 * 0.16, "direita")
+    end
     self:retangulo(bb, 330, 54, 440, 36, c.preto)
     self:texto(bb, 342, 63, "▶", "mono700", 15, c.branco, 18)
     local x = 364
@@ -290,19 +295,20 @@ function D:painel(bb, v, data, hora, quadro)
     end
     self:texto(bb, x, 63, self:caber(v.descricao, "mono400", 15, 758 - x), "mono400", 15, c.branco, 18)
 
-    self:texto(bb, 342, 98, "antes:", "mono400", 13, c.c888, 16)
-    self:texto(bb, 399, 98, self:caber(v.antes, "mono400", 13, 770 - 399), "mono400", 13, c.c888, 16)
+    -- a lista comeca onde o rotulo termina ("antes:" no original, "before:" em ingles)
+    local xa = math.max(399, 342 + self:texto(bb, 342, 98, L.t("painel_antes"), "mono400", 13, c.c888, 16) + 8)
+    self:texto(bb, xa, 98, self:caber(v.antes, "mono400", 13, 770 - xa), "mono400", 13, c.c888, 16)
 
-    for _, item in ipairs({ { 434, v.sessao, "SESSÃO" }, { 666, v.semana, "SEMANA" } }) do
+    for _, item in ipairs({ { 434, v.sessao, L.t("painel_sessao") }, { 666, v.semana, L.t("painel_semana") } }) do
         local cx, lim, rotulo = item[1], item[2], item[3]
         self:anel(bb, cx - 85, 200, lim.pct)
         self:texto(bb, cx, 252, lim.txt, "inter900", 52, c.preto, 50, -2.08, "centro")
         self:texto(bb, cx, 304, rotulo, "mono700", 11, c.c444, 14, 11 * 0.16, "centro")
-        self:texto(bb, cx, 380, lim.zera, "mono400", 13, c.c444, 16, 0, "centro")
+        self:texto(bb, cx, 380, self:caber(lim.zera, "mono400", 13, 220), "mono400", 13, c.c444, 16, 0, "centro")
     end
 
     self:retangulo(bb, 330, 483, 440, 3, c.preto)
-    self:texto(bb, 330, 504, "TOKENS HOJE", "mono700", 12, c.c444, 16, 12 * 0.16)
+    self:texto(bb, 330, 504, L.t("painel_tokens_hoje"), "mono700", 12, c.c444, 16, 12 * 0.16)
     self:texto(bb, 330, 524, v.tokens_hoje, "inter900", 48, c.preto, 46, -1.92)
     local w = self:texto(bb, 770, 534, v.tokens_hora, "mono400", 13, c.c444, 16, 0, "direita")
     self:texto(bb, 770 - w - 6, 534, "▲", "mono400", 13, c.c444, 16, 0, "direita")

@@ -3,12 +3,15 @@ Transforma o JSON que vem do PC no que o painel e o overlay mostram.
 
 Nao depende do KOReader (da para testar com LuaJIT puro). Os textos e as
 regras de animacao vieram do server.py do kindle-claude (guithepc, MIT).
+O PC manda so dados (modo, nomes, numeros, horas); as frases saem daqui, no
+idioma escolhido (claudinho/textos.lua).
 ]]
+
+local L = require("claudinho/textos")
 
 local E = {}
 
 E.SEM_SINAL_APOS = 10 * 60      -- sem noticia do PC ha mais que isso: "sem sinal"
-E.DIAS = { "dom", "seg", "ter", "qua", "qui", "sex", "sáb" }   -- os.date wday: 1 = domingo
 
 -- segundos por quadro de cada animacao
 E.ATRASO = {
@@ -23,15 +26,6 @@ local ANIMACAO = {
     chamando = "esperando", descansando = "descansando", sem_sinal = "descansando",
 }
 
-local TEXTOS = {
-    descansando = { "Fogão desligado", "última ação há %s" },
-    esperando = { "Tá pronto!", "esperando você há %s" },
-    chamando = { "Te chamando!", "esperando você há %s" },
-    prato = { "Prato pronto!", "terminou há %s" },
-    cozinhando = { "Cozinhando…", "última ação há %s" },
-    sem_sinal = { "Sem sinal do PC", "última notícia há %s" },
-}
-
 --- Grupo usado pelo overlay da leitura (so tres estados importam ali).
 E.GRUPO = {
     cozinhando = "trabalhando", chamando = "aprovacao", esperando = "pronto",
@@ -41,10 +35,11 @@ E.GRUPO = {
 function E.fmt_tokens(n)
     if n == nil then return "--" end
     if n >= 100000 then
-        return (string.format("%.1f", n / 1000000):gsub("%.", ",")) .. " mi"
+        local s = string.format("%.1f", n / 1000000):gsub("%.", L.t("decimal"))
+        return L.t("milhoes", s)
     end
     if n >= 1000 then
-        return string.format("%.0f mil", n / 1000)
+        return L.t("milhares", string.format("%.0f", n / 1000))
     end
     return tostring(math.floor(n))
 end
@@ -85,11 +80,29 @@ function E.sequencia(modo, sorteio)
     return seq
 end
 
+--- Limite de uso: { pct = 11, hora = "15:00" } e, na semana, dia = 1..7 (segunda = 1).
 local function limite(t)
     t = type(t) == "table" and t or {}
     local pct = tonumber(t.pct)
-    return { pct = pct, txt = pct and string.format("%.0f%%", pct) or "--", zera = t.zera or "" }
+    local zera = ""
+    if type(t.hora) == "string" and t.hora ~= "" then
+        local dia = tonumber(t.dia)
+        zera = dia and L.t("zera_dia", L.dia(dia), t.hora) or L.t("zera_as", t.hora)
+    elseif type(t.zera) == "string" then
+        zera = t.zera                -- agente antigo (v1): ja vinha escrito em portugues
+    end
+    return { pct = pct, txt = pct and string.format("%.0f%%", pct) or "--", zera = zera }
 end
+
+--- O que aparece na barra quando nao ha ferramenta rodando.
+local function sem_ferramenta(modo)
+    if modo == "cozinhando" then return L.t("pensando") end
+    if modo == "chamando" then return L.t("esperando_resposta") end
+    return L.t("nada_no_fogo")
+end
+
+-- frases que o agente antigo (v1) mandava prontas: viram o texto do idioma atual
+local ANTIGOS = { ["pensando…"] = true, ["nada no fogo"] = true, ["esperando sua resposta"] = true }
 
 --[[--
 Calcula a diferenca entre o relogio do Kindle e o do PC no momento da leitura
@@ -116,7 +129,7 @@ nao mostra "ha 3 h" a toa.
 function E.interpretar(dados, agora, info)
     info = info or {}
     local d = type(dados) == "table" and dados or {}
-    local modo = TEXTOS[d.modo] and d.modo or "descansando"
+    local modo = E.GRUPO[d.modo] and d.modo ~= "sem_sinal" and d.modo or "descansando"
     local agora_pc = agora - (info.desvio or 0)
     local idade = info.recebido_em and (agora - info.recebido_em) or nil
     local sem_sinal = dados == nil
@@ -128,19 +141,21 @@ function E.interpretar(dados, agora, info)
         ha = idade
     end
 
-    local titulo, linha = TEXTOS[modo][1], TEXTOS[modo][2]
-    linha = string.format(linha, ha and E.fmt_ha(ha) or "--")
+    local titulo = L.t("titulo_" .. modo)
+    local linha = L.t("linha_" .. modo, ha and E.fmt_ha(ha) or "--")
     local ativos = tonumber(d.ativos) or 0
-    if not sem_sinal and ativos > 1 then
-        linha = linha .. " · " .. ativos .. " no fogo"
-    end
+    -- com varias sessoes, o painel mostra "3 AGENTES" no topo (na linha nao cabia)
+    local agentes = (not sem_sinal and ativos > 1) and L.t("varios_agentes", ativos) or ""
 
-    local ferramenta = (not sem_sinal and d.ferramenta) or ""
+    local ferramenta = (not sem_sinal and type(d.ferramenta) == "string" and d.ferramenta) or ""
     local descricao
     if sem_sinal then
-        descricao = (info.falhas or 0) >= 3 and "sem conexão" or "PC desligado?"
+        descricao = (info.falhas or 0) >= 3 and L.t("sem_conexao") or L.t("pc_desligado")
     else
-        descricao = d.descricao or ""
+        descricao = type(d.descricao) == "string" and d.descricao or ""
+        if ferramenta == "" and (descricao == "" or ANTIGOS[descricao]) then
+            descricao = sem_ferramenta(modo)
+        end
         if ativos > 1 and (d.projeto or "") ~= "" and ferramenta ~= "" then
             descricao = descricao .. " · " .. d.projeto     -- varios agentes: de qual projeto e
         end
@@ -157,22 +172,24 @@ function E.interpretar(dados, agora, info)
         grupo = E.GRUPO[modo],
         titulo = titulo,
         linha = linha,
+        agentes = agentes,
         ferramenta = ferramenta,
         descricao = descricao,
-        antes = #antes > 0 and table.concat(antes, " · ") or "nada ainda",
+        antes = #antes > 0 and table.concat(antes, " · ") or L.t("nada_ainda"),
         sessao = limite(d.sessao),
         semana = limite(d.semana),
         tokens_hoje = E.fmt_tokens(tonumber(tok.hoje)),
-        tokens_hora = E.fmt_tokens(tonumber(tok.hora)) .. " na última hora",
-        tokens_media = "média " .. E.fmt_tokens(tonumber(tok.media)) .. "/dia",
+        tokens_hora = L.t("tokens_hora", E.fmt_tokens(tonumber(tok.hora))),
+        tokens_media = L.t("tokens_media", E.fmt_tokens(tonumber(tok.media))),
         rev = d.rev,
+        idioma = L.atual(),
     }
 end
 
---- "qui 22/10" e "13:12" com o relogio do Kindle.
+--- "qui 22/10" (ou "Thu Oct 22") e "13:12" com o relogio do Kindle.
 function E.data_hora(agora)
     local t = os.date("*t", agora)
-    return string.format("%s %02d/%02d", E.DIAS[t.wday], t.day, t.month), string.format("%02d:%02d", t.hour, t.min)
+    return L.data(t.wday, t.day, t.month), string.format("%02d:%02d", t.hour, t.min)
 end
 
 return E

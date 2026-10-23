@@ -90,6 +90,23 @@ ok(estado()["descricao"] == "Main.java", "arquivo sem a pasta")
 tam = len(json.dumps(estado(), ensure_ascii=False, separators=(",", ":")).encode())
 ok(tam < 1200, f"estado pequeno ({tam} bytes)")
 
+print("estado sem frases em portugues (v2)")
+limpar()
+hook({**base, "hook_event_name": "UserPromptSubmit"})
+e = estado()
+ok(e["v"] == 2 and e["modo"] == "cozinhando" and e["descricao"] == "", "pensando: descricao vazia, o Kindle escreve")
+os.makedirs(os.path.join(PC, "data"), exist_ok=True)
+zera = time.time() + 3600
+with open(os.path.join(PC, "data", "statusline.json"), "w") as f:
+    json.dump({"rate_limits": {"five_hour": {"used_percentage": 11.4, "resets_at": zera},
+                               "seven_day": {"used_percentage": 19, "resets_at": zera}}}, f)
+e = estado()
+import datetime as _dt
+quando = _dt.datetime.fromtimestamp(zera)
+ok(e["sessao"] == {"pct": 11, "hora": quando.strftime("%H:%M")}, f"sessao: {e['sessao']}")
+ok(e["semana"] == {"pct": 19, "hora": quando.strftime("%H:%M"), "dia": quando.isoweekday()}, f"semana: {e['semana']}")
+ok("zera" not in json.dumps(e) and "fogo" not in json.dumps(e), "nenhuma frase pronta no estado")
+
 print("sessao interrompida")
 sys.path.insert(0, PC)
 import claudinho  # noqa
@@ -146,10 +163,14 @@ lua = open(os.path.join(tmp, "kindle", "claudinho.koplugin", "config.lua")).read
 ok("http://127.0.0.1:8799/estado.json" in lua and "modo" not in lua, "config.lua do plugin")
 r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--sem-perguntas", "--porta"],
                    capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
-ok(r.returncode != 0 and "Faltou o valor" in r.stderr, "setup: --porta sem valor da erro claro")
-r = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--porta"],
-                   capture_output=True, text=True, env=env)
-ok(r.returncode != 0 and "--porta" in r.stderr and "Traceback" not in r.stderr, "agente: --porta sem valor")
+ok(r.returncode != 0 and "Missing value" in r.stderr, "setup: --porta sem valor da erro claro")
+for flag in ("--port", "--porta"):
+    r = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), flag],
+                       capture_output=True, text=True, env=env)
+    ok(r.returncode != 0 and "--port" in r.stderr and "Traceback" not in r.stderr, f"agente: {flag} sem valor")
+ok("Done." in subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--no-prompt", "--no-hooks",
+                              "--ip", "127.0.0.1", "--port", "8799"], capture_output=True, text=True, env=env,
+                             stdin=subprocess.DEVNULL).stdout, "setup em ingles, com as opcoes novas")
 
 srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--demo", "chamando"],
                        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

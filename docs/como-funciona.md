@@ -17,13 +17,15 @@ O agente (`pc/claudinho.py`) junta as sessões, escolhe a mais urgente (pedindo 
 |---|---|
 | `modo` | `cozinhando`, `chamando` (pedindo permissão), `prato` (acabou de terminar), `esperando`, `descansando` |
 | `desde` | quando o modo começou (relógio do PC) |
-| `ferramenta`, `descricao` | o que está rodando agora, ou "pensando…" / "nada no fogo" |
+| `ferramenta`, `descricao` | o que está rodando agora (vazios quando não há ferramenta) |
 | `ativos`, `projeto` | quantas sessões estão trabalhando e o projeto da que aparece |
 | `antes` | as últimas 4 ferramentas |
-| `sessao`, `semana` | `pct` usado e o texto de quando zera, já no fuso do PC |
+| `sessao`, `semana` | `pct` usado e a `hora` em que zera, no fuso do PC; na semana, também o `dia` (1 = segunda … 7 = domingo) |
 | `tokens` | `hoje`, `hora`, `media`, arredondados ao que o Kindle mostra |
 | `rev` | resumo do conteúdo: muda só quando algo visível muda |
 | `agora` | relógio do PC no momento |
+
+O estado leva só dados, nenhuma frase pronta (versão 2 do formato). As frases ("Cozinhando…", "pensando…", "zera às 15:00") são montadas no Kindle, no idioma escolhido, por `claudinho/textos.lua`. Por isso trocar o idioma não depende do PC. Um agente antigo (versão 1, que mandava as frases em português) continua funcionando.
 
 O `rev` ignora o `agora` e arredonda os números para a precisão que o painel mostra (`2,5 mi`, `32 mil`). Assim, o Kindle só redesenha quando a tela realmente mudaria.
 
@@ -34,10 +36,10 @@ Uma sessão "trabalhando" sem nenhum evento há mais de 10 minutos passa a conta
 O estado é um JSON pequeno, assim:
 
 ```json
-{"v":1,"modo":"cozinhando","desde":1792715237,"ferramenta":"Edit",
+{"v":2,"modo":"cozinhando","desde":1792715237,"ferramenta":"Edit",
  "descricao":"DashboardController.java","ativos":1,"projeto":"camaleao",
- "antes":["Read","Grep","Bash"],"sessao":{"pct":11,"zera":"zera às 15:00"},
- "semana":{"pct":19,"zera":"zera dom 21:00"},
+ "antes":["Read","Grep","Bash"],"sessao":{"pct":11,"hora":"15:00"},
+ "semana":{"pct":19,"hora":"21:00","dia":7},
  "tokens":{"hoje":2500000,"hora":400000,"media":1800000},"rev":"bcd87aea4697","agora":1792715244}
 ```
 

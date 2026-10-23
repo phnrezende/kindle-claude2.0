@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Agente do Claudinho no computador.
+"""Claudinho agent (runs on the computer).
 
-Junta o que os hooks e a statusLine do Claude Code gravaram, mais os tokens
-dos historicos, num JSON pequeno (o "estado") e serve para o Kindle na rede
-de casa, em http://<ip>:<porta>/estado.json.
+Gathers what the Claude Code hooks and statusLine saved, plus the token counts
+from the session logs, into a small JSON (the "state") and serves it to the
+Kindle on your home network at http://<ip>:<port>/estado.json.
 
-    python3 claudinho.py                 roda conforme o config.json
-    python3 claudinho.py --demo MODO     dados ficticios (testar sem Claude Code)
-    python3 claudinho.py --estado        imprime o estado atual e sai
-    python3 claudinho.py --porta 8787    usa outra porta
+    python3 claudinho.py                 run with config.json
+    python3 claudinho.py --demo MODE     fake data (test without Claude Code)
+    python3 claudinho.py --state         print the current state and exit
+    python3 claudinho.py --port 8787     use another port
 
-Modos de demo: cozinhando, cebola, pensando, chamando, prato, esperando,
+Demo modes: cozinhando, cebola, pensando, chamando, prato, esperando,
 descansando, varios
+
+(Os comentarios do codigo seguem em portugues; o que aparece no terminal e
+em ingles.)
 
 So usa a biblioteca padrao do Python. A logica de sessoes e tokens veio do
 server.py do kindle-claude (guithepc, licenca MIT).
@@ -35,7 +38,7 @@ STATE = os.path.join(DATA, "state.json")
 STATUS = os.path.join(DATA, "statusline.json")
 CONFIG = os.path.join(BASE, "config.json")
 PROJECTS = os.path.expanduser("~/.claude/projects")
-VERSAO = 1
+VERSAO = 2                  # 2: so dados; as frases (e o idioma) ficam no Kindle
 
 PRATO_SECONDS = 60          # quanto tempo o "prato pronto" fica depois de terminar
 REST_AFTER = 30 * 60        # parado ha mais que isso = descansando
@@ -44,7 +47,6 @@ TOOL_STALE = 10 * 60        # ferramenta "rodando" ha mais que isso: considera e
 PARADO_APOS = 10 * 60       # "trabalhando" sem nenhum evento ha mais que isso: foi
                             # interrompido (Esc ou erro de API nao disparam o Stop)
 TOKENS_A_CADA = 30          # segundos entre recontagens dos historicos
-WEEKDAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 
 # limites de tamanho do que vai para o Kindle (o painel corta o resto de qualquer jeito)
 MAX_FERRAMENTA = 40
@@ -182,22 +184,22 @@ def session_view(s, now):
         asked_tool = now - float(s.get("tool_started") or 0) < 120
         if asked_tool and s.get("tool_name"):
             return 5, "chamando", since, s["tool_name"], s.get("tool_desc", "")
-        return 5, "chamando", since, "", "esperando sua resposta"
+        return 5, "chamando", since, "", ""
     if status == "working":
         started = float(s.get("tool_started") or 0)
         recent = now - started < TOOL_LINGER
         if (s.get("tool_running") and now - started < TOOL_STALE) or recent:
             return 4, "cozinhando", last, s.get("tool_name", ""), s.get("tool_desc", "")
         if now - last < PARADO_APOS:
-            return 3, "cozinhando", last, "", "pensando…"
+            return 3, "cozinhando", last, "", ""
         # sem evento nenhum ha muito tempo: foi interrompido e o Stop nao veio
-        return 1, "esperando", last, "", "nada no fogo"
+        return 1, "esperando", last, "", ""
     if status == "done":
         done_at = float(s.get("done_at") or last)
         if now - done_at < PRATO_SECONDS:
-            return 2, "prato", done_at, "", "nada no fogo"
-        return 1, "esperando", done_at, "", "nada no fogo"
-    return 0, "descansando", last, "", "nada no fogo"
+            return 2, "prato", done_at, "", ""
+        return 1, "esperando", done_at, "", ""
+    return 0, "descansando", last, "", ""
 
 
 def derive(state, now):
@@ -210,7 +212,7 @@ def derive(state, now):
     if not views:
         last = max([float(s.get("last_event") or 0) for s in sessions.values()] or
                    [float(state.get("last_event") or 0)])
-        return {"mode": "descansando", "since": last, "tool": "", "desc": "nada no fogo",
+        return {"mode": "descansando", "since": last, "tool": "", "desc": "",
                 "active": 0, "project": ""}
     (rank, mode, since, tool, desc), s = max(
         views, key=lambda vs: (vs[0][0], float(vs[1].get("last_event") or 0)))
@@ -259,12 +261,17 @@ DEMOS = ["cozinhando", "cebola", "pensando", "chamando", "prato", "esperando", "
 
 # ------------------------------------------------------------------ estado
 
-def fmt_reset(epoch, week):
+def quando_zera(epoch, week):
+    """Hora em que o limite zera, no fuso do PC, e o dia da semana (1 = segunda)
+    para o limite semanal. O Kindle escreve a frase no idioma dele."""
     try:
         dt = datetime.fromtimestamp(float(epoch))
     except Exception:
-        return ""
-    return f"zera {WEEKDAYS[dt.weekday()]} {dt:%H:%M}" if week else f"zera às {dt:%H:%M}"
+        return {}
+    r = {"hora": f"{dt:%H:%M}"}
+    if week:
+        r["dia"] = dt.isoweekday()
+    return r
 
 
 def como_kindle(n):
@@ -295,8 +302,8 @@ def montar_estado(now=None, demo_mode=None):
         d = rl.get(key) or {}
         pct = d.get("used_percentage")
         if pct is None:
-            return {"pct": None, "zera": ""}
-        return {"pct": int(round(float(pct))), "zera": fmt_reset(d.get("resets_at"), week)}
+            return {"pct": None}
+        return {"pct": int(round(float(pct))), **quando_zera(d.get("resets_at"), week)}
 
     estado = {
         "v": VERSAO,
@@ -347,10 +354,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/estado.json":
                 if Servidor.token and not self.autorizado():
-                    return self.reply(401, b'{"erro":"token invalido"}', "application/json")
+                    return self.reply(401, b'{"error":"invalid token"}', "application/json")
                 demo_mode = (q.get("demo") or [Servidor.demo])[0]
                 if demo_mode is not None and demo_mode not in DEMOS:
-                    return self.reply(400, b'{"erro":"demo desconhecida"}', "application/json")
+                    return self.reply(400, b'{"error":"unknown demo"}', "application/json")
                 estado = Servidor.estado(demo_mode)
                 etag = f'"{estado["rev"]}"'
                 extra = {"ETag": etag}
@@ -360,13 +367,13 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/saude":
                 return self.reply(200, b"ok\n", "text/plain")
             if url.path == "/":
-                txt = ("Claudinho no ar.\n\nO Kindle le /estado.json"
-                       " (com Authorization: Bearer TOKEN).\nTeste: /estado.json?demo=chamando\n")
+                txt = ("Claudinho is running.\n\nThe Kindle reads /estado.json"
+                       " (with Authorization: Bearer TOKEN).\nTry: /estado.json?demo=chamando\n")
                 return self.reply(200, txt.encode(), "text/plain; charset=utf-8")
         except Exception as e:
-            log(f"Erro ao responder {url.path}: {e!r}")
-            return self.reply(500, b"erro interno", "text/plain; charset=utf-8")
-        self.reply(404, b"nao encontrado", "text/plain")
+            log(f"Error answering {url.path}: {e!r}")
+            return self.reply(500, b"internal error", "text/plain; charset=utf-8")
+        self.reply(404, b"not found", "text/plain")
 
     def autorizado(self):
         auth = self.headers.get("Authorization") or ""
@@ -409,14 +416,14 @@ def rodar(cfg, demo_mode):
     try:
         srv = ThreadingHTTPServer(("0.0.0.0", porta), Handler)
     except OSError as e:
-        sys.exit(f"Nao consegui abrir a porta {porta} ({e}). Ja tem outro claudinho.py rodando?"
-                 " Use --porta para escolher outra.")
-    log(f"O Kindle le http://{ip_local()}:{porta}/estado.json")
+        sys.exit(f"Could not open port {porta} ({e}). Is another claudinho.py already running?"
+                 " Use --port to pick another one.")
+    log(f"The Kindle reads http://{ip_local()}:{porta}/estado.json")
     if not Servidor.token:
-        log("Aviso: sem token. Qualquer aparelho da rede consegue ler o estado. Rode setup.py.")
+        log("Warning: no token. Any device on the network can read the state. Run setup.py.")
     if demo_mode:
-        log(f"Demo ligada: '{demo_mode}' (dados ficticios)")
-    log("Ctrl+C para sair.")
+        log(f"Demo on: '{demo_mode}' (fake data)")
+    log("Press Ctrl+C to quit.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -425,37 +432,40 @@ def rodar(cfg, demo_mode):
 
 # ------------------------------------------------------------------ main
 
-def valor_de(args, nome, padrao=None):
-    if nome not in args:
-        return padrao
-    i = args.index(nome)
-    if i + 1 >= len(args) or args[i + 1].startswith("--"):
-        return None
-    return args[i + 1]
+def opcao(args, *nomes):
+    """(presente, valor) da primeira opcao de `nomes` que aparece em `args`."""
+    for nome in nomes:
+        if nome in args:
+            i = args.index(nome)
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                return True, args[i + 1]
+            return True, None
+    return False, None
 
 
 def main():
     args = sys.argv[1:]
     demo_mode = None
-    if "--demo" in args:
-        demo_mode = valor_de(args, "--demo") or "chamando"
+    tem, valor = opcao(args, "--demo")
+    if tem:
+        demo_mode = valor or "chamando"
         if demo_mode not in DEMOS:
-            sys.exit(f"Demo desconhecida. Use uma destas: {', '.join(DEMOS)}")
-    if "--estado" in args:
+            sys.exit(f"Unknown demo. Use one of: {', '.join(DEMOS)}")
+    if "--state" in args or "--estado" in args:
         print(json.dumps(montar_estado(demo_mode=demo_mode), ensure_ascii=False, indent=2))
         return
     cfg = load_config()
-    if "--porta" in args:
-        porta = valor_de(args, "--porta")
+    tem, porta = opcao(args, "--port", "--porta")
+    if tem:
         if not porta or not porta.isdigit() or not 0 < int(porta) < 65536:
-            sys.exit("Use --porta com um numero, por exemplo: --porta 8787")
+            sys.exit("Use --port with a number, for example: --port 8787")
         cfg["porta"] = int(porta)
     os.makedirs(DATA, exist_ok=True)
     if not os.path.exists(CONFIG):
-        log("Sem config.json ainda. Rode python3 setup.py para configurar.")
+        log("No config.json yet. Run python3 setup.py to set things up.")
     elif cfg.get("modo") == "remoto":
-        log("O modo remoto foi removido; servindo na rede local."
-            " Rode python3 setup.py conexao e copie o plugin de novo para o Kindle.")
+        log("Remote mode was removed; serving on the local network."
+            " Run python3 setup.py connection and copy the plugin to the Kindle again.")
     rodar(cfg, demo_mode)
 
 

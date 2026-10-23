@@ -58,7 +58,7 @@ def main():
     if five is not None:
         parts.append(f"5h {five:.0f}%")
     if week is not None:
-        parts.append(f"semana {week:.0f}%")
+        parts.append(f"week {week:.0f}%")
     print(" | ".join(parts))
 
 

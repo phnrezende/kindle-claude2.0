@@ -41,7 +41,13 @@ O painel mostra:
 - os tokens de hoje, da última hora e a média diária;
 - o Claudinho chef animado, mas só no retângulo dele, para o resto da tela e-ink ficar parado.
 
-Com vários agentes rodando, aparece o mais urgente: pedindo permissão > trabalhando > terminou > descansando.
+Com vários agentes rodando, aparece o mais urgente: pedindo permissão > trabalhando > terminou > descansando, e o topo do painel mostra quantos estão trabalhando ("3 AGENTES").
+
+### Português ou inglês
+
+As telas no Kindle (painel, overlay e menu) existem em português (Brasil) e em inglês. A escolha é feita no próprio Kindle, em **Claudinho → Idioma** (*Language*), e vale na hora, sem rodar o setup nem copiar o plugin de novo. Sem escolha, segue o idioma do KOReader: português se ele estiver em português, inglês nos outros.
+
+O assistente e o agente no computador falam sempre em inglês.
 
 ## Como funciona
 
@@ -90,7 +96,7 @@ python3 pc/claudinho.py
 
 Reinicie as sessões do Claude Code que já estavam abertas, para elas passarem a mandar eventos.
 
-Mudou o IP ou a porta? `python3 pc/setup.py conexao` e copie o plugin de novo.
+Mudou o IP ou a porta? `python3 pc/setup.py connection` e copie o plugin de novo.
 
 ### 2. No Kindle
 
@@ -122,6 +128,7 @@ Guia completo em [docs/emulador.md](docs/emulador.md).
 | Mudar o canto ou o tamanho | Claudinho → Overlay na leitura → Canto / Tamanho |
 | Ler sem distração quando o Claude está parado | Overlay → Esconder quando o Claude estiver parado |
 | Painel com o logo do Kindle do outro lado | Claudinho → Painel → Logo do Kindle à direita |
+| Telas em inglês (ou em português) | Claudinho → Idioma |
 
 Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel). Deixe-o no carregador se for usar como painel de mesa.
 
@@ -137,6 +144,7 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | | não deixar o Kindle dormir | sim |
 | Atualizar a cada | lendo / com o painel aberto | 60 s / 30 s |
 | Conexão | endereço, token | do `config.lua` |
+| Idioma | automático, português (Brasil) ou inglês | automático (o do KOReader) |
 
 No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`.
 
@@ -151,7 +159,7 @@ kindle-claude2.0/
 │   └── statusline.py        guarda o % de uso e repassa a sua statusLine
 ├── kindle/claudinho.koplugin/
 │   ├── main.lua             plugin: menu, overlay, buscas, ciclo de vida
-│   ├── claudinho/           painel, desenho, estado, busca, json, sprites
+│   ├── claudinho/           painel, desenho, estado, textos (pt/en), busca, json, sprites
 │   └── fonts/               Inter Tight e JetBrains Mono (estáticas, OFL)
 ├── tools/
 │   ├── harness/             roda o desenho do plugin fora do Kindle + testes

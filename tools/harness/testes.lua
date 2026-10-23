@@ -10,7 +10,9 @@ package.preload["ffi/util"] = function() return {} end
 package.preload["logger"] = function() return {} end
 
 local E = require("claudinho/estado")
+local L = require("claudinho/textos")
 local json = require("claudinho/json")
+L.escolher("pt")
 local Busca = require("claudinho/busca")
 
 local falhas = 0
@@ -34,7 +36,7 @@ igual(E.fmt_ha(3 * 3600 + 300), "3 h", "3 h")
 print("estado")
 local agora = 1000000
 local d = { modo = "chamando", desde = agora - 40, agora = agora, ferramenta = "Bash", descricao = "rm -rf build/",
-    ativos = 1, antes = { "Edit", "Read" }, sessao = { pct = 11, zera = "zera às 15:00" }, semana = {},
+    ativos = 1, antes = { "Edit", "Read" }, sessao = { pct = 11, hora = "15:00" }, semana = {},
     tokens = { hoje = 2480000, hora = 420000 }, rev = "abc" }
 local info = { recebido_em = agora, desvio = E.desvio(d, agora), falhas = 0 }
 local v = E.interpretar(d, agora, info)
@@ -43,6 +45,7 @@ igual(v.linha, "esperando você há 40s", "linha")
 igual(v.grupo, "aprovacao", "grupo do overlay")
 igual(v.antes, "Edit · Read", "antes")
 igual(v.sessao.txt, "11%", "sessao")
+igual(v.sessao.zera, "zera às 15:00", "quando zera a sessao")
 igual(v.semana.txt, "--", "semana sem dado")
 igual(v.tokens_media, "média --/dia", "media sem dado")
 
@@ -67,7 +70,8 @@ print("varios agentes")
 local d3 = { modo = "cozinhando", desde = agora - 7, agora = agora, ferramenta = "Edit", descricao = "x.java",
     ativos = 3, projeto = "camaleao" }
 v = E.interpretar(d3, agora, { recebido_em = agora })
-igual(v.linha, "última ação há 7s · 3 no fogo", "conta os agentes")
+igual(v.linha, "última ação há 7s", "a linha fica so com o tempo")
+igual(v.agentes, "3 AGENTES", "conta os agentes (no topo do painel)")
 igual(v.descricao, "x.java · camaleao", "diz o projeto")
 
 print("animacao")
@@ -78,6 +82,52 @@ for i = 3, #seq, 2 do if seq[i] == seq[i - 2] then repetiu = true end end
 igual(repetiu, false, "nunca repete o mesmo bloco seguido")
 igual(E.sequencia("descansando")[2], "descansando_2", "descansando")
 igual(E.quadro_parado("prato"), "prato_1", "quadro parado")
+
+print("sem ferramenta: o Kindle escreve a frase")
+local base = { agora = agora, desde = agora - 5, ferramenta = "", descricao = "" }
+local function com(t) local r = {} for k, x in pairs(base) do r[k] = x end for k, x in pairs(t) do r[k] = x end return r end
+igual(E.interpretar(com{ modo = "cozinhando" }, agora, { recebido_em = agora }).descricao, "pensando…", "pensando")
+igual(E.interpretar(com{ modo = "chamando" }, agora, { recebido_em = agora }).descricao, "esperando sua resposta", "esperando resposta")
+igual(E.interpretar(com{ modo = "prato" }, agora, { recebido_em = agora }).descricao, "nada no fogo", "nada no fogo")
+igual(E.interpretar(com{ modo = "cozinhando", descricao = "pensando…" }, agora, { recebido_em = agora }).descricao,
+    "pensando…", "agente antigo (v1) com a frase pronta")
+igual(E.interpretar(com{ modo = "cozinhando", sessao = { pct = 3, zera = "zera às 9:00" } }, agora,
+    { recebido_em = agora }).sessao.zera, "zera às 9:00", "agente antigo (v1): zera ja escrito")
+igual(E.interpretar(com{ modo = "cozinhando", semana = { pct = 3, hora = "21:00", dia = 7 } }, agora,
+    { recebido_em = agora }).semana.zera, "zera dom 21:00", "semana: dia e hora")
+
+print("ingles")
+L.escolher("en")
+local ve = E.interpretar(d, agora, info)
+igual(ve.titulo, "Calling you!", "titulo")
+igual(ve.linha, "waiting on you for 40s", "linha")
+igual(ve.sessao.zera, "resets at 15:00", "quando zera")
+igual(E.interpretar(com{ modo = "descansando", semana = { pct = 1, hora = "21:00", dia = 7 } }, agora,
+    { recebido_em = agora }).semana.zera, "resets Sun 21:00", "semana")
+igual(E.fmt_tokens(2480000), "2.5M", "milhoes")
+igual(E.fmt_tokens(31500), "32K", "milhares")
+igual(ve.tokens_hora, "0.4M in the last hour", "ultima hora")
+igual(ve.tokens_media, "avg --/day", "media sem dado")
+igual(E.interpretar(nil, agora, {}).titulo, "No PC signal", "sem sinal")
+igual(E.interpretar(com{ modo = "cozinhando", ativos = 2 }, agora, { recebido_em = agora }).agentes, "2 AGENTS", "agentes")
+igual(L.data(5, 22, 10), "Thu Oct 22", "data")
+L.escolher("pt")
+igual(L.data(5, 22, 10), "qui 22/10", "data em portugues")
+L.escolher(nil)
+igual(L.atual(), "en", "sem escolha e fora do KOReader: ingles")
+_G.G_reader_settings = { readSetting = function(_, k) return k == "language" and "pt_BR" or nil end }
+igual(L.atual(), "pt", "segue o KOReader em portugues")
+_G.G_reader_settings = nil
+L.escolher("pt")
+
+print("os dois idiomas tem os mesmos textos")
+local faltando = {}
+for a, b in pairs({ pt = "en", en = "pt" }) do
+    for k in pairs(L._TEXTOS[a]) do
+        if L._TEXTOS[b][k] == nil and k ~= "meses" then faltando[#faltando + 1] = b .. "." .. k end
+    end
+end
+igual(table.concat(faltando, ", "), "", "nenhuma chave faltando")
 
 print("busca: empacotar e desempacotar")
 local r = Busca._desempacotar(Busca._empacotar({ codigo = 200, etag = '"abc"', corpo = 'linha1\nlinha2' }))

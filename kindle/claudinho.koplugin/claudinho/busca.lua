@@ -10,6 +10,7 @@ com prazo curto.
 local UIManager = require("ui/uimanager")
 local ffiutil = require("ffi/util")
 local logger = require("logger")
+local L = require("claudinho/textos")
 
 local Busca = {
     PRAZO = 20,              -- segundos ate desistir de uma busca
@@ -35,7 +36,7 @@ local function requisitar(url, token, etag)
     })
     socketutil:reset_timeout()
     if cab == nil then
-        return { erro = tostring(codigo or status or "sem resposta") }
+        return { erro = tostring(codigo or status or L.t("erro_sem_resposta")) }
     end
     return {
         codigo = tonumber(codigo),
@@ -52,9 +53,9 @@ local function empacotar(r)
 end
 
 local function desempacotar(s)
-    if not s or s == "" then return { erro = "subprocesso sem resposta" } end
+    if not s or s == "" then return { erro = L.t("erro_subprocesso") } end
     local codigo, etag, erro, corpo = s:match("^([^\n]*)\n([^\n]*)\n([^\n]*)\n(.*)$")
-    if not codigo then return { erro = "resposta ilegivel" } end
+    if not codigo then return { erro = L.t("erro_ilegivel") } end
     return {
         codigo = tonumber(codigo),
         etag = etag ~= "" and etag or nil,
@@ -102,12 +103,12 @@ function Busca.get(url, token, etag, pronto)
                 -- recolhe o processo depois, para nao virar zumbi
                 UIManager:scheduleIn(1, function() ffiutil.isSubProcessDone(pid) end)
                 ffiutil.readAllFromFD(fd)
-                return true, { erro = "tempo esgotado" }
+                return true, { erro = L.t("erro_tempo") }
             end
             return false
         end)
         if not ok then
-            terminar({ erro = "falha ao ler a resposta: " .. tostring(pronta) })
+            terminar({ erro = L.t("erro_leitura", tostring(pronta)) })
         elseif pronta then
             terminar(r)
         else

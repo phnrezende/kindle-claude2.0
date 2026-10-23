@@ -103,7 +103,11 @@ package.preload["ui/widget/notification"] = function()
     return { SOURCE_ALWAYS_SHOW = 0x8000, notify = function(_, t) print("  [aviso] " .. t) end }
 end
 package.preload["ui/widget/inputdialog"] = function() return { new = function() return {} end } end
-package.preload["dispatcher"] = function() return { registerAction = function() end } end
+-- como no KOReader: guarda a tabela do primeiro registro e ignora os seguintes
+local acoes = {}
+package.preload["dispatcher"] = function()
+    return { registerAction = function(_, nome, valor) if acoes[nome] == nil then acoes[nome] = valor end end }
+end
 package.preload["pluginshare"] = function() return {} end
 package.preload["datastorage"] = function() return { getSettingsDir = function() return "/tmp" end } end
 package.preload["luasettings"] = function()
@@ -178,7 +182,18 @@ local p = Claudinho:new{ ui = leitor }
 confere(menu_registrado == p, "registrou o menu")
 local itens = {}
 p:addToMainMenu(itens)
-confere(itens.claudinho and #itens.claudinho.sub_item_table == 6, "menu com 6 itens")
+confere(itens.claudinho and #itens.claudinho.sub_item_table == 7, "menu com 7 itens")
+local function item(t, n) return t.sub_item_table[n] end
+local idioma = item(itens.claudinho, 6)
+require("claudinho/textos").escolher("pt")
+confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "menu em portugues")
+item(idioma, 3).callback()          -- English
+confere(item(itens.claudinho, 1).text_func() == "Open the panel" and p.settings:readSetting("idioma") == "en",
+    "trocar para ingles muda o menu na hora e fica salvo")
+confere(idioma.text_func() == "Language: English", "item do idioma: " .. idioma.text_func())
+confere(acoes.claudinho_painel.title == "Claudinho: open the panel", "nome do gesto tambem muda")
+item(idioma, 2).callback()          -- Portugues
+confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "volta para portugues")
 p.settings:saveSetting("url", URL)
 p.settings:saveSetting("token", TOKEN)
 p:onReaderReady()

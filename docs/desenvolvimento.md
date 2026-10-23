@@ -22,8 +22,9 @@ python3 pc/claudinho.py --demo chamando &
 luajit tools/harness/fumaca.lua http://127.0.0.1:8787/estado.json SEU_TOKEN /tmp
 
 # imagens do painel e do overlay (PGM; converta com qualquer programa de imagem)
-luajit tools/harness/render.lua estado.json painel.pgm 1 13:12 "qui 22/10"
-luajit tools/harness/imagens.lua /tmp
+luajit tools/harness/render.lua estado.json painel.pgm 1 13:12 "qui 22/10"   # [pt|en] no fim
+luajit tools/harness/imagens.lua /tmp        # em portugues
+luajit tools/harness/imagens.lua /tmp en     # em ingles
 ```
 
 O `fumaca.lua` confere: menu registrado, overlay no ReaderView, leitura em subprocesso, refresh só do cantinho, overlay acima da barra de status, painel girado, animação só na região do mascote, toque fecha, e "sem sinal" depois de 3 falhas.
@@ -42,4 +43,5 @@ Os sprites seguem a regra do original: grade 36×24, `#` traço, `+` cinza, `.` 
 
 - **Nomes de módulos:** o KOReader junta as pastas de todos os plugins no caminho de busca do Lua. Por isso os módulos ficam em `claudinho/…` (`require("claudinho/estado")`), para não colidir com módulos do KOReader como `json`.
 - **Fontes:** o `Font:getFace` só aceita caminho de arquivo começando com `/` ou `./`, e escala o tamanho pela tela. O plugin compensa a escala para desenhar no pixel exato do design.
+- **Textos:** tudo o que aparece no Kindle (painel, menu, avisos, erros) está em `claudinho/textos.lua`, em português e inglês. O `testes.lua` confere que os dois idiomas têm as mesmas chaves. Mudou um texto? Gere as imagens nos dois idiomas com o `imagens.lua` para ver se cabe: o título tem 240 de largura, a linha de baixo 240 e o "zera às" 220 (unidades de design, em 800×600).
 - **Instâncias:** o KOReader cria uma instância nova do plugin ao trocar entre a biblioteca e um livro. O último estado fica num módulo compartilhado, então nada some na troca.

@@ -30,9 +30,10 @@ local Busca = require("claudinho/busca")
 local D = require("claudinho/desenho")
 local E = require("claudinho/estado")
 local json = require("claudinho/json")
+local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
-local VERSAO = "1.1"
+local VERSAO = "1.2"
 
 local PADRAO = {
     overlay = true,
@@ -47,12 +48,7 @@ local PADRAO = {
     painel_acordado = true,        -- nao deixa o Kindle dormir com o painel aberto
 }
 
-local CANTOS = {
-    { "superior_direito", "Superior direito" },
-    { "superior_esquerdo", "Superior esquerdo" },
-    { "inferior_direito", "Inferior direito" },
-    { "inferior_esquerdo", "Inferior esquerdo" },
-}
+local CANTOS = { "superior_direito", "superior_esquerdo", "inferior_direito", "inferior_esquerdo" }
 
 -- Estado compartilhado entre as instancias do plugin (o KOReader cria uma
 -- nova ao trocar entre a biblioteca e um livro): assim nada some na troca.
@@ -96,6 +92,7 @@ function Claudinho:init()
         self.settings:saveSetting("config_gerado_em", self.cfg.gerado_em)
         self.settings:flush()
     end
+    L.escolher(self.settings:readSetting("idioma"))   -- nil: segue o idioma do KOReader
 
     self.tarefa = function() self:ciclo() end
     self:onDispatcherRegisterActions()
@@ -182,7 +179,7 @@ end
 --- ja houvesse outra busca em andamento (ai espera por ela).
 function Claudinho:buscar(depois)
     local url = self:url()
-    local motivo = (url == "" and "sem URL configurada") or (not conectado() and "Wi-Fi desligado") or nil
+    local motivo = (url == "" and L.t("erro_sem_url")) or (not conectado() and L.t("erro_wifi")) or nil
     if motivo then
         self:falhou(motivo)
         self:atualizar_vistas()
@@ -207,18 +204,18 @@ function Claudinho:receber(r)
             C.recebido_em = os.time()
             C.desvio = E.desvio(dados, C.recebido_em)
         else
-            self:falhou("resposta invalida: " .. tostring(err))
+            self:falhou(L.t("erro_resposta", tostring(err)))
         end
     elseif r.codigo == 304 then
         -- nada mudou; o desvio do relogio continua o da ultima resposta completa
         C.recebido_em = os.time()
         C.falhas, C.erro = 0, nil
     elseif r.codigo == 401 then
-        self:falhou("token recusado pelo PC")
+        self:falhou(L.t("erro_token"))
     elseif r.codigo then
-        self:falhou("HTTP " .. r.codigo)
+        self:falhou(L.t("erro_http", r.codigo))
     else
-        self:falhou(r.erro or "sem resposta")
+        self:falhou(r.erro or L.t("erro_sem_resposta"))
     end
     if C.erro then logger.dbg("Claudinho:", C.erro) end
     if not self.fechado then self:atualizar_vistas() end
@@ -333,7 +330,7 @@ function Claudinho:abrir_painel()
     UIManager:show(self.painel)
     if not C.dica_mostrada then
         C.dica_mostrada = true
-        Notification:notify("Toque na tela para voltar aos livros", Notification.SOURCE_ALWAYS_SHOW)
+        Notification:notify(L.t("dica_voltar"), Notification.SOURCE_ALWAYS_SHOW)
     end
     self:reiniciar(0)
 end
@@ -372,11 +369,19 @@ function Claudinho:onCloseWidget()
     if self.painel then UIManager:close(self.painel) end
 end
 
+-- O Dispatcher guarda estas tabelas como vieram (e ignora um segundo registro com o
+-- mesmo nome); trocar o title nelas e o que atualiza o nome do gesto ao mudar o idioma.
+local ACOES = {
+    { "claudinho_painel", { category = "none", event = "ClaudinhoPainel", general = true }, "gesto_painel" },
+    { "claudinho_overlay", { category = "none", event = "ClaudinhoOverlay", general = true, separator = true },
+        "gesto_overlay" },
+}
+
 function Claudinho:onDispatcherRegisterActions()
-    Dispatcher:registerAction("claudinho_painel", { category = "none", event = "ClaudinhoPainel",
-        title = "Claudinho: abrir o painel", general = true })
-    Dispatcher:registerAction("claudinho_overlay", { category = "none", event = "ClaudinhoOverlay",
-        title = "Claudinho: ligar/desligar o overlay", general = true, separator = true })
+    for _, a in ipairs(ACOES) do
+        a[2].title = L.t(a[3])
+        Dispatcher:registerAction(a[1], a[2])
+    end
 end
 
 function Claudinho:onClaudinhoPainel()
@@ -392,8 +397,7 @@ end
 function Claudinho:alternar_overlay()
     local ligado = not self:opt("overlay")
     self:salvar("overlay", ligado)
-    Notification:notify(ligado and "Overlay do Claudinho ligado" or "Overlay do Claudinho desligado",
-        Notification.SOURCE_ALWAYS_SHOW)
+    Notification:notify(L.t(ligado and "overlay_ligado" or "overlay_desligado"), Notification.SOURCE_ALWAYS_SHOW)
     self:atualizar_overlay(true)
     self:reiniciar(0)
 end
@@ -406,9 +410,17 @@ function Claudinho:mudar(chave, valor, menu)
     if menu then menu:updateItems() end
 end
 
+--- Texto de um item: chave de claudinho/textos.lua ou uma funcao que devolve o texto.
+local function texto_de(texto)
+    if type(texto) == "function" then return texto end
+    return function() return L.t(texto) end
+end
+
+--- Itens do menu usam text_func: assim o texto acompanha a troca de idioma
+--- sem reiniciar o KOReader. `texto` e uma chave de claudinho/textos.lua.
 function Claudinho:item_radio(texto, chave, valor, depois)
     return {
-        text = texto,
+        text_func = texto_de(texto),
         radio = true,
         checked_func = function() return self:opt(chave) == valor end,
         keep_menu_open = true,
@@ -421,7 +433,7 @@ end
 
 function Claudinho:item_liga(texto, chave, depois)
     return {
-        text = texto,
+        text_func = texto_de(texto),
         checked_func = function() return self:opt(chave) end,
         keep_menu_open = true,
         callback = function(menu)
@@ -438,8 +450,8 @@ function Claudinho:editar(titulo, chave, atual, ajuda)
         input = atual,
         description = ajuda,
         buttons = { {
-            { text = "Cancelar", id = "close", callback = function() UIManager:close(dialogo) end },
-            { text = "Salvar", is_enter_default = true, callback = function()
+            { text = L.t("cancelar"), id = "close", callback = function() UIManager:close(dialogo) end },
+            { text = L.t("salvar"), is_enter_default = true, callback = function()
                 local valor = (dialogo:getInputText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
                 UIManager:close(dialogo)
                 self:salvar(chave, valor)
@@ -453,33 +465,58 @@ function Claudinho:editar(titulo, chave, atual, ajuda)
 end
 
 function Claudinho:testar_conexao()
-    UIManager:show(InfoMessage:new{ text = "Buscando o estado…", timeout = 1 })
+    UIManager:show(InfoMessage:new{ text = L.t("buscando"), timeout = 1 })
     C.etag = nil
     self:buscar(function()
         local texto
         if C.falhas == 0 and C.dados then
             local v = self:vista()
-            texto = string.format("Conectado.\n\nClaude: %s\n%s", v.titulo, v.linha)
+            texto = L.t("conectado", v.titulo, v.linha)
         else
-            texto = "Não consegui ler o estado.\n\n" .. (C.erro or "erro desconhecido") ..
-                "\n\nURL: " .. self:url()
+            texto = L.t("nao_conectou", C.erro or L.t("erro_desconhecido"), self:url())
         end
         UIManager:show(InfoMessage:new{ text = texto })
     end)
 end
 
+function Claudinho:item_idioma(idioma)
+    return {
+        text_func = function() return idioma and L.NOMES[idioma] or L.t("idioma_auto") end,
+        radio = true,
+        checked_func = function() return self.settings:readSetting("idioma") == idioma end,
+        keep_menu_open = true,
+        callback = function(menu)
+            if idioma then
+                self:salvar("idioma", idioma)
+            else
+                self.settings:delSetting("idioma")
+                self.settings:flush()
+            end
+            L.escolher(idioma)
+            self:onDispatcherRegisterActions()     -- nomes dos gestos no idioma novo
+            if menu then menu:updateItems() end
+        end,
+    }
+end
+
 function Claudinho:addToMainMenu(menu_items)
     local cantos = {}
     for _, c in ipairs(CANTOS) do
-        cantos[#cantos + 1] = self:item_radio(c[2], "overlay_canto", c[1])
+        cantos[#cantos + 1] = self:item_radio("canto_" .. c, "overlay_canto", c)
     end
     local function intervalos(chave, opcoes)
         local t = {}
         for _, s in ipairs(opcoes) do
-            t[#t + 1] = self:item_radio(s < 60 and (s .. " segundos") or ((s / 60) .. " min"), chave, s,
-                function() self:reiniciar(1) end)
+            t[#t + 1] = self:item_radio(function()
+                return s < 60 and L.t("segundos", s) or L.t("minutos", s / 60)
+            end, chave, s, function() self:reiniciar(1) end)
         end
         return t
+    end
+    local function submenu(chave, itens, extra)
+        local m = { text_func = texto_de(chave), sub_item_table = itens }
+        for k, v in pairs(extra or {}) do m[k] = v end
+        return m
     end
 
     menu_items.claudinho = {
@@ -487,91 +524,78 @@ function Claudinho:addToMainMenu(menu_items)
         sorting_hint = "tools",
         sub_item_table = {
             {
-                text = "Abrir o painel",
+                text_func = texto_de("menu_abrir"),
                 callback = function()
                     -- o menu fecha logo depois deste callback; abre o painel em seguida
                     UIManager:nextTick(function() self:abrir_painel() end)
                 end,
                 separator = true,
             },
-            {
-                text = "Overlay na leitura",
-                sub_item_table = {
-                    self:item_liga("Mostrar o Claudinho no canto da página", "overlay", function() self:reiniciar(0) end),
-                    { text = "Canto", sub_item_table = cantos },
-                    { text = "Tamanho", sub_item_table = {
-                        self:item_radio("Mini", "overlay_tamanho", 1),
-                        self:item_radio("Pequeno", "overlay_tamanho", 2),
-                        self:item_radio("Médio", "overlay_tamanho", 3),
-                    } },
-                    self:item_liga("Esconder quando o Claude estiver parado", "overlay_so_ativo"),
-                    self:item_liga("Animar (gasta mais bateria)", "overlay_animar"),
+            submenu("menu_overlay", {
+                self:item_liga("menu_mostrar", "overlay", function() self:reiniciar(0) end),
+                submenu("menu_canto", cantos),
+                submenu("menu_tamanho", {
+                    self:item_radio("tamanho_1", "overlay_tamanho", 1),
+                    self:item_radio("tamanho_2", "overlay_tamanho", 2),
+                    self:item_radio("tamanho_3", "overlay_tamanho", 3),
+                }),
+                self:item_liga("menu_esconder", "overlay_so_ativo"),
+                self:item_liga("menu_animar_overlay", "overlay_animar"),
+            }),
+            submenu("menu_painel", {
+                self:item_radio("menu_logo_esquerda", "painel_rotacao", 90),
+                self:item_radio("menu_logo_direita", "painel_rotacao", 270),
+                self:item_liga("menu_animar_mascote", "painel_animar"),
+                self:item_liga("menu_acordado", "painel_acordado"),
+            }),
+            submenu("menu_atualizar", {
+                submenu("menu_lendo", intervalos("intervalo_leitura", { 30, 60, 120, 300 })),
+                submenu("menu_com_painel", intervalos("intervalo_painel", { 15, 30, 60 })),
+            }),
+            submenu("menu_conexao", {
+                {
+                    text_func = function() return L.t("menu_endereco", self:url() ~= "" and self:url() or L.t("vazio")) end,
+                    keep_menu_open = true,
+                    callback = function()
+                        self:editar(L.t("endereco_titulo"), "url", self:url(), L.t("endereco_ajuda"))
+                    end,
                 },
-            },
-            {
-                text = "Painel",
-                sub_item_table = {
-                    self:item_radio("Logo do Kindle à esquerda", "painel_rotacao", 90),
-                    self:item_radio("Logo do Kindle à direita", "painel_rotacao", 270),
-                    self:item_liga("Animar o mascote", "painel_animar"),
-                    self:item_liga("Não deixar o Kindle dormir com o painel aberto", "painel_acordado"),
+                {
+                    text_func = texto_de("menu_token"),
+                    keep_menu_open = true,
+                    callback = function()
+                        self:editar(L.t("menu_token"), "token", self:token(), L.t("token_ajuda"))
+                    end,
                 },
-            },
-            {
-                text = "Atualizar a cada",
-                sub_item_table = {
-                    { text = "Lendo", sub_item_table = intervalos("intervalo_leitura", { 30, 60, 120, 300 }) },
-                    { text = "Com o painel aberto", sub_item_table = intervalos("intervalo_painel", { 15, 30, 60 }) },
+                {
+                    text_func = texto_de("menu_testar"),
+                    keep_menu_open = true,
+                    callback = function() self:testar_conexao() end,
                 },
-            },
-            {
-                text = "Conexão",
-                sub_item_table = {
-                    {
-                        text_func = function() return "Endereço: " .. (self:url() ~= "" and self:url() or "(vazio)") end,
-                        keep_menu_open = true,
-                        callback = function()
-                            self:editar("Endereço do estado", "url", self:url(),
-                                "http://IP-DO-PC:8787/estado.json (PC e Kindle na mesma rede Wi-Fi)")
-                        end,
-                    },
-                    {
-                        text = "Token",
-                        keep_menu_open = true,
-                        callback = function()
-                            self:editar("Token", "token", self:token(), "O mesmo que está em pc/config.json (\"token\").")
-                        end,
-                    },
-                    {
-                        text = "Testar a conexão agora",
-                        keep_menu_open = true,
-                        callback = function() self:testar_conexao() end,
-                    },
-                    {
-                        text = "Voltar ao config.lua do setup",
-                        enabled_func = function() return self.cfg.url ~= nil end,
-                        keep_menu_open = true,
-                        callback = function(menu)
-                            self.settings:delSetting("url")
-                            self.settings:delSetting("token")
-                            self.settings:flush()
-                            C.etag, C.falhas = nil, 0
-                            self:reiniciar(0)
-                            if menu then menu:updateItems() end
-                        end,
-                    },
+                {
+                    text_func = texto_de("menu_voltar_config"),
+                    enabled_func = function() return self.cfg.url ~= nil end,
+                    keep_menu_open = true,
+                    callback = function(menu)
+                        self.settings:delSetting("url")
+                        self.settings:delSetting("token")
+                        self.settings:flush()
+                        C.etag, C.falhas = nil, 0
+                        self:reiniciar(0)
+                        if menu then menu:updateItems() end
+                    end,
                 },
-                separator = true,
-            },
+            }, { separator = true }),
+            submenu(function() return L.t("menu_idioma", L.NOMES[L.atual()]) end, {
+                self:item_idioma(nil),
+                self:item_idioma("pt"),
+                self:item_idioma("en"),
+            }),
             {
-                text = "Sobre",
+                text_func = texto_de("menu_sobre"),
                 keep_menu_open = true,
                 callback = function()
-                    UIManager:show(InfoMessage:new{
-                        text = "Claudinho " .. VERSAO .. "\n\nO status do Claude Code no seu Kindle.\n\n"
-                            .. "Painel e Claudinho chef: kindle-claude, de guithepc (MIT).\n"
-                            .. "Fontes Inter Tight e JetBrains Mono (OFL).",
-                    })
+                    UIManager:show(InfoMessage:new{ text = L.t("sobre", VERSAO) })
                 end,
             },
         },

@@ -115,8 +115,9 @@ end
 --- Chamado pelo plugin quando chega estado novo do PC.
 function Painel:novo_estado()
     local antes_modo, antes_rev = self.modo, self.v and self.v.rev
+    local antes_idioma = self.v and self.v.idioma
     local v = self.ler_estado()
-    if v.rev == antes_rev and v.modo == antes_modo then return end
+    if v.rev == antes_rev and v.modo == antes_modo and v.idioma == antes_idioma then return end
     self:redesenhar()
     self.trocas = self.trocas + 1
     local tipo = "ui"

@@ -1,19 +1,22 @@
 --[[--
 Gera as imagens do README com o codigo de desenho do proprio plugin.
 
-    KO=... KOBASE=... luajit tools/harness/imagens.lua pasta_saida
+    KO=... KOBASE=... luajit tools/harness/imagens.lua pasta_saida [pt|en]
 ]]
 local H = dofile((debug.getinfo(1, "S").source:sub(2):match("(.*/)") or "./") .. "boot.lua")
 local D = require("claudinho/desenho")
 local E = require("claudinho/estado")
+local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 local BB = H.BB
-local SAIDA = ... or "."
+local SAIDA, IDIOMA = ...
+SAIDA = SAIDA or "."
+L.escolher(IDIOMA or "pt")
 
 local agora = os.time()
 local base = {
     agora = agora, ativos = 1, projeto = "camaleao", antes = { "mcp:notion", "Bash", "Grep", "Read" },
-    sessao = { pct = 11, zera = "zera às 15:00" }, semana = { pct = 19, zera = "zera dom 21:00" },
+    sessao = { pct = 11, hora = "15:00" }, semana = { pct = 19, hora = "21:00", dia = 7 },
     tokens = { hoje = 2480000, hora = 420000, media = 1830000 },
 }
 local function com(t)
@@ -25,15 +28,15 @@ end
 local telas = {
     trabalhando = com{ modo = "cozinhando", desde = agora - 7, ferramenta = "Edit", descricao = "DashboardController.java" },
     aprovacao = com{ modo = "chamando", desde = agora - 40, ferramenta = "Bash", descricao = "rm -rf build/" },
-    pronto = com{ modo = "esperando", desde = agora - 125, ferramenta = "", descricao = "nada no fogo" },
-    descansando = com{ modo = "descansando", desde = agora - 2700, ferramenta = "", descricao = "nada no fogo" },
+    pronto = com{ modo = "esperando", desde = agora - 125, ferramenta = "", descricao = "" },
+    descansando = com{ modo = "descansando", desde = agora - 2700, ferramenta = "", descricao = "" },
 }
 
 local d = D.novo(BB, H.RT, H.fonte, sprites, 1)
 for nome, dados in pairs(telas) do
     local v = E.interpretar(dados, agora, { recebido_em = agora, desvio = 0 })
     local bb = BB.new(800, 600, BB.TYPE_BB8)
-    d:painel(bb, v, "qui 22/10", "13:12", E.quadro_parado(v.modo))
+    d:painel(bb, v, L.data(5, 22, 10), "13:12", E.quadro_parado(v.modo))   -- quinta, 22/10
     H.salvar_pgm(bb, SAIDA .. "/painel-" .. nome .. ".pgm")
 end
 

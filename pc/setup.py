@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Assistente de instalacao do Claudinho no computador.
+"""Claudinho setup assistant (runs on the computer).
 
-    python3 setup.py             liga hooks + statusLine e configura a conexao
-    python3 setup.py conexao     so reconfigura a conexao (IP, porta, token)
-    python3 setup.py remover     tira os hooks e a statusLine do Claude Code
+    python3 setup.py               turn on the hooks + statusLine and set up the connection
+    python3 setup.py connection    only set up the connection again (IP, port, token)
+    python3 setup.py remove        take the hooks and the statusLine out of Claude Code
 
-Sem perguntas (para scripts):
-    python3 setup.py --sem-perguntas [--ip 192.168.0.10] [--porta 8787] [--token X]
-    --sem-hooks   nao mexe no ~/.claude/settings.json
+Without questions (for scripts):
+    python3 setup.py --no-prompt [--ip 192.168.0.10] [--port 8787] [--token X]
+    --no-hooks    leave ~/.claude/settings.json alone
 
-Ao final ele grava:
-    pc/config.json                         o que o agente (claudinho.py) usa
-    kindle/claudinho.koplugin/config.lua   o que o plugin do Kindle usa
+When it finishes it writes:
+    pc/config.json                         what the agent (claudinho.py) uses
+    kindle/claudinho.koplugin/config.lua   what the Kindle plugin uses
+
+The setup always talks in English. The language of the Kindle screens is
+chosen on the Kindle itself (Claudinho > Language).
+
+(Os comentarios do codigo seguem em portugues. Os nomes antigos dos comandos,
+como "conexao", "remover", --sem-perguntas, --sem-hooks e --porta, continuam
+valendo.)
 """
 import json
 import os
@@ -42,17 +49,22 @@ import claudinho  # noqa: E402  (mesmo diretorio)
 
 # ------------------------------------------------------------------ util
 
-def args_opt(name, default=None):
-    if name in sys.argv:
-        i = sys.argv.index(name)
-        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("--"):
-            return sys.argv[i + 1]
-        sys.exit(f"Faltou o valor de {name}.")
+def tem_opcao(*nomes):
+    return any(n in sys.argv for n in nomes)
+
+
+def args_opt(*nomes, default=None):
+    for name in nomes:
+        if name in sys.argv:
+            i = sys.argv.index(name)
+            if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("--"):
+                return sys.argv[i + 1]
+            sys.exit(f"Missing value for {name}.")
     return default
 
 
 def interativo():
-    return "--sem-perguntas" not in sys.argv and sys.stdin.isatty()
+    return not tem_opcao("--no-prompt", "--sem-perguntas") and sys.stdin.isatty()
 
 
 def perguntar(texto, padrao=""):
@@ -92,7 +104,7 @@ def save_settings(cfg):
     if os.path.exists(SETTINGS):
         bak = f"{SETTINGS}.bak-claudinho-{int(time.time())}"
         shutil.copy2(SETTINGS, bak)
-        print(f"Backup do settings.json salvo em {bak}")
+        print(f"Backed up settings.json to {bak}")
     tmp = SETTINGS + ".tmp-claudinho"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -100,7 +112,7 @@ def save_settings(cfg):
 
 
 def instalar_hooks():
-    titulo("Hooks e statusLine do Claude Code")
+    titulo("Claude Code hooks and statusLine")
     cfg = load_settings()
     hooks = cfg.setdefault("hooks", {})
     for event, matcher in EVENTS.items():
@@ -116,10 +128,10 @@ def instalar_hooks():
     if current and STATUS_PATH not in current:
         with open(ORIG, "w", encoding="utf-8") as f:
             f.write(current)
-        print("Sua statusLine antiga foi guardada e continua aparecendo.")
+        print("Your old statusLine was saved and will keep showing.")
     cfg["statusLine"] = {"type": "command", "command": STATUS_CMD}
     save_settings(cfg)
-    print("Hooks ligados. Reinicie as sessoes do Claude Code que ja estavam abertas.")
+    print("Hooks are on. Restart any Claude Code sessions that were already open.")
 
 
 def remover_hooks():
@@ -138,7 +150,7 @@ def remover_hooks():
         else:
             cfg.pop("statusLine", None)
     save_settings(cfg)
-    print("Hooks e statusLine do Claudinho removidos.")
+    print("Claudinho's hooks and statusLine were removed.")
 
 
 # ------------------------------------------------------------------ config
@@ -152,54 +164,57 @@ def gravar_configs(cfg, url_kindle):
         json.dump(cfg, f, indent=2, ensure_ascii=False)
     gerado = time.strftime("%Y-%m-%d %H:%M:%S")
     with open(PLUGIN_CONFIG, "w", encoding="utf-8") as f:
-        f.write("-- Gerado por pc/setup.py. Para mudar, rode o setup de novo ou use o menu\n")
-        f.write("-- do plugin no Kindle (Claudinho > Conexao).\n")
+        f.write("-- Written by pc/setup.py. To change it, run the setup again or use the\n")
+        f.write("-- plugin menu on the Kindle (Claudinho > Connection).\n")
         f.write("return {\n")
         f.write(f"    url = {lua_str(url_kindle)},\n")
         f.write(f"    token = {lua_str(cfg.get('token', ''))},\n")
         f.write(f"    gerado_em = {lua_str(gerado)},\n")
         f.write("}\n")
-    print(f"\nGravado: {CONFIG}")
-    print(f"Gravado: {PLUGIN_CONFIG}")
+    print(f"\nWrote: {CONFIG}")
+    print(f"Wrote: {PLUGIN_CONFIG}")
 
 
 def configurar_conexao():
     atual = claudinho.load_config() if os.path.exists(CONFIG) else {}
-    titulo("Conexao com o Kindle (mesma rede Wi-Fi)")
+    titulo("Connection to the Kindle (same Wi-Fi network)")
     if atual.get("modo") == "remoto":
-        print("O modo remoto foi removido. Agora o Kindle le direto do PC, na mesma rede.")
+        print("Remote mode was removed. The Kindle now reads straight from this computer,"
+              " on the same network.")
 
     token = args_opt("--token") or atual.get("token") or secrets.token_urlsafe(18)
-    ip = args_opt("--ip") or perguntar("IP deste computador na rede", claudinho.ip_local())
+    ip = args_opt("--ip") or perguntar("This computer's IP on the network", claudinho.ip_local())
 
-    porta = porta_valida(args_opt("--porta", atual.get("porta") or 8787))
+    porta = porta_valida(args_opt("--port", "--porta", default=atual.get("porta") or 8787))
     if porta is None:
-        sys.exit("A porta precisa ser um numero entre 1 e 65535.")
+        sys.exit("The port has to be a number between 1 and 65535.")
     while True:
-        resp = porta_valida(perguntar("Porta", str(porta)))
+        resp = porta_valida(perguntar("Port", str(porta)))
         if resp is not None:
             porta = resp
             break
-        print("Digite um numero entre 1 e 65535.")
+        print("Type a number between 1 and 65535.")
 
     cfg = {"porta": porta, "token": token}
     url = f"http://{ip}:{porta}/estado.json"
     gravar_configs(cfg, url)
     print(f"""
-Pronto. Agora:
-  1. Deixe rodando:  python3 "{os.path.join(BASE, 'claudinho.py')}"
-  2. Copie a pasta "{PLUGIN}" para koreader/plugins/ no Kindle.
-Dica: se o IP do PC mudar, reserve um IP fixo para ele no roteador.""")
+Done. Now:
+  1. Keep this running:  python3 "{os.path.join(BASE, 'claudinho.py')}"
+  2. Copy the folder "{PLUGIN}" to koreader/plugins/ on the Kindle.
+Tip: if this computer's IP changes, reserve a fixed IP for it on your router.
+The Kindle screens can be in English or Portuguese: Claudinho > Language, on the Kindle.""")
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "remover":
+    comando = sys.argv[1] if len(sys.argv) > 1 else ""
+    if comando in ("remove", "remover"):
         remover_hooks()
         return
-    if len(sys.argv) > 1 and sys.argv[1] in ("conexao", "modo"):
+    if comando in ("connection", "conexao", "modo"):
         configurar_conexao()
         return
-    if "--sem-hooks" not in sys.argv:
+    if not tem_opcao("--no-hooks", "--sem-hooks"):
         instalar_hooks()
     configurar_conexao()
 
@@ -208,4 +223,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nCancelado.")
+        print("\nCancelled.")

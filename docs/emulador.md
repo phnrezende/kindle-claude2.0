@@ -32,7 +32,7 @@ ln -s "$PWD/kindle/claudinho.koplugin" ~/.config/koreader/plugins/
 Gere a configuração apontando para a própria VM (sem mexer no Claude Code):
 
 ```sh
-python3 pc/setup.py --sem-perguntas --ip 127.0.0.1 --sem-hooks
+python3 pc/setup.py --no-prompt --ip 127.0.0.1 --no-hooks
 ```
 
 Deixe o agente rodando em outro terminal, com um estado fictício:
