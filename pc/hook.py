@@ -83,6 +83,13 @@ class FileLock:
         self.f.close()
 
 
+def numero(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def cortar(texto, n=MAX_DESC):
     texto = " ".join(str(texto or "").split())
     return texto if len(texto) <= n else texto[:n - 1].rstrip() + "…"
@@ -141,11 +148,15 @@ def update(state, event, now):
     name = event.get("hook_event_name", "")
     if name == "Notification" and not precisa_de_voce(event):
         return False
-    sid = event.get("session_id") or "sem-id"
-    sessions = state.setdefault("sessions", {})
-    s = sessions.setdefault(sid, {})
+    sid = str(event.get("session_id") or "sem-id")    # chave do JSON: sempre texto
+    if not isinstance(state.get("sessions"), dict):
+        state["sessions"] = {}
+    sessions = state["sessions"]
+    if not isinstance(sessions.get(sid), dict):
+        sessions[sid] = {}
+    s = sessions[sid]
     cwd = event.get("cwd")
-    if cwd:
+    if isinstance(cwd, str) and cwd:
         s["project"] = os.path.basename(cwd.rstrip("/\\")) or cwd
 
     if name == "PreToolUse":
@@ -158,7 +169,7 @@ def update(state, event, now):
             desc = short_desc(nome, event.get("tool_input"))
         s.update(status="working", tool_running=True, tool_name=tool,
                  tool_desc=desc, tool_started=now)
-        tools = state.setdefault("tools", [])
+        tools = state["tools"] if isinstance(state.get("tools"), list) else []
         tools.append({"name": tool, "desc": desc, "t": now, "session": sid})
         state["tools"] = tools[-MAX_TOOLS:]
     elif name in ("PostToolUse", "PostToolUseFailure"):
@@ -176,7 +187,7 @@ def update(state, event, now):
 
     s["last_event"] = now
     state["last_event"] = now
-    for k in [k for k, v in sessions.items() if now - float(v.get("last_event") or 0) > FORGET_AFTER]:
+    for k in [k for k, v in sessions.items() if not isinstance(v, dict) or now - numero(v.get("last_event")) > FORGET_AFTER]:
         del sessions[k]
     return True
 
@@ -186,6 +197,8 @@ def main():
         event = json.load(sys.stdin)
     except Exception:
         return
+    if not isinstance(event, dict):
+        return
     os.makedirs(DATA, exist_ok=True)
     with FileLock(LOCK):
         try:
@@ -193,8 +206,8 @@ def main():
                 state = json.load(f)
         except Exception:
             state = {}
-        if "sessions" not in state:      # formato antigo: recomeca limpo
-            state = {"tools": state.get("tools", [])}
+        if not isinstance(state, dict) or "sessions" not in state:   # formato antigo: recomeca limpo
+            state = {"tools": state.get("tools", []) if isinstance(state, dict) else []}
         if not update(state, event, time.time()):
             return
         tmp = STATE + ".tmp"

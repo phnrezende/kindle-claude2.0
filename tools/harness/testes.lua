@@ -120,6 +120,25 @@ igual(L.atual(), "pt", "segue o KOReader em portugues")
 _G.G_reader_settings = nil
 L.escolher("pt")
 
+print("dados estranhos nunca dao erro (o overlay roda a cada pagina)")
+local estranhos = { {}, { 1 }, true, 5, "x", -1, 1e300 }
+local campos = { "modo", "desde", "ferramenta", "descricao", "ativos", "projeto", "antes", "sessao", "semana",
+    "tokens", "rev", "agora" }
+local falhou_estranho = nil
+for _, c in ipairs(campos) do
+    for _, valor in ipairs(estranhos) do
+        local dd = { modo = "cozinhando", ativos = 2, ferramenta = "Edit", projeto = "p" }
+        dd[c] = valor
+        local ok, err = pcall(E.interpretar, dd, agora, { recebido_em = agora })
+        if not ok then falhou_estranho = c .. ": " .. tostring(err) end
+    end
+end
+igual(falhou_estranho, nil, "nenhum campo estranho quebra o interpretar")
+local vt = E.interpretar({ modo = "cozinhando", ativos = 2, ferramenta = "Edit", projeto = {}, descricao = true,
+    antes = { "Read", {}, 3 } }, agora, { recebido_em = agora })
+igual(vt.descricao, "", "descricao que nao e texto vira vazia")
+igual(vt.antes, "Read · 3", "'antes' ignora o que nao e texto")
+
 print("os dois idiomas tem os mesmos textos")
 local faltando = {}
 for a, b in pairs({ pt = "en", en = "pt" }) do

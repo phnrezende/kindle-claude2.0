@@ -20,6 +20,8 @@ def main():
         data = json.loads(raw)
     except Exception:
         data = {}
+    if not isinstance(data, dict):
+        data = {}
 
     try:
         os.makedirs(DATA, exist_ok=True)
@@ -28,11 +30,20 @@ def main():
                 old = json.load(f)
         except Exception:
             old = {}
-        # rate_limits so aparece depois da primeira resposta: mantem o anterior
-        if not data.get("rate_limits") and old.get("rate_limits"):
-            data["rate_limits"] = old["rate_limits"]
+        if not isinstance(old, dict):
+            old = {}
+        # rate_limits so aparece depois da primeira resposta, e o Claude Code tira cada
+        # janela (5 h, semana) do JSON quando ela vence. Guarda cada uma separadamente:
+        # vencida, o agente mostra 0% em vez de "--".
+        novo = data.get("rate_limits") if isinstance(data.get("rate_limits"), dict) else {}
+        antigo = old.get("rate_limits") if isinstance(old.get("rate_limits"), dict) else {}
+        juntos = dict(antigo)
+        juntos.update(novo)
+        if juntos:
+            data["rate_limits"] = juntos
         data["saved_at"] = time.time()
-        tmp = STATUS + ".tmp"
+        # um nome por processo: varias sessoes rodam a statusLine ao mesmo tempo
+        tmp = f"{STATUS}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
         os.replace(tmp, STATUS)
@@ -50,15 +61,22 @@ def main():
             except Exception:
                 pass
 
-    model = (data.get("model") or {}).get("display_name", "Claude")
-    rl = data.get("rate_limits") or {}
-    five = (rl.get("five_hour") or {}).get("used_percentage")
-    week = (rl.get("seven_day") or {}).get("used_percentage")
-    parts = [model]
-    if five is not None:
-        parts.append(f"5h {five:.0f}%")
-    if week is not None:
-        parts.append(f"week {week:.0f}%")
+    def campo(d, *chaves):
+        for c in chaves:
+            d = d.get(c) if isinstance(d, dict) else None
+        return d
+
+    parts = [str(campo(data, "model", "display_name") or "Claude")]
+    agora = time.time()
+    for rotulo, janela in (("5h", "five_hour"), ("week", "seven_day")):
+        pct = campo(data, "rate_limits", janela, "used_percentage")
+        zera = campo(data, "rate_limits", janela, "resets_at")
+        try:
+            # uma janela guardada de antes que ja venceu nao aparece na linha
+            if pct is not None and (zera is None or float(zera) > agora):
+                parts.append(f"{rotulo} {float(pct):.0f}%")
+        except (TypeError, ValueError):
+            pass
     print(" | ".join(parts))
 
 

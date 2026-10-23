@@ -111,7 +111,8 @@ def is_ours(entry):
 
 
 def antigos(entries):
-    """Quantos desses hooks sao do Claudinho, mas de outra pasta."""
+    """Quantos desses hooks sao do Claudinho, mas de outra pasta (que mudou de
+    lugar ou e outra copia do repositorio)."""
     return sum(1 for e in entries for h in e.get("hooks", [])
                if comando_nosso(h.get("command"), "hook.py") and HOOK_PATH not in (h.get("command") or ""))
 
@@ -154,7 +155,8 @@ def instalar_hooks():
 
     os.makedirs(DATA, exist_ok=True)
     if velhos:
-        print(f"Replaced {velhos} old Claudinho hook(s) that pointed to a folder that no longer exists.")
+        print(f"Replaced {velhos} Claudinho hook(s) that pointed to another folder"
+              " (an old or moved copy) with the ones from this folder.")
     current = (cfg.get("statusLine") or {}).get("command", "")
     if current and not comando_nosso(current, "statusline.py"):
         with open(ORIG, "w", encoding="utf-8") as f:

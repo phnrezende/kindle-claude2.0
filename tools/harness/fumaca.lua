@@ -255,6 +255,21 @@ confere(estilo == "apagado", "overlay fica apagado (" .. tostring(quadro) .. ")"
 p:mudar("overlay_so_ativo", true)
 confere(p:overlay_alvo() == false, "com 'esconder quando parado', some")
 
+print("6. um erro no plugin nao quebra a pagina")
+local E = require("claudinho/estado")
+local original = E.interpretar
+E.interpretar = function() error("erro de teste") end
+p:mudar("overlay_so_ativo", false)
+local ok_pagina = pcall(pagina)
+local ok_busca = pcall(function() p:buscar(); rodar(2) end)
+local ok_painel = pcall(function() p:abrir_painel(); rodar(2); pilha[#pilha]:onTap() end)
+E.interpretar = original
+confere(ok_painel and p.painel == nil, "o painel abre (com o minimo) e fecha")
+confere(ok_pagina, "o livro continua sendo desenhado")
+confere(ok_busca, "a busca e a atualizacao seguem sem erro")
+pagina()
+confere(true, "com o erro corrigido, o overlay volta")
+
 p:onCloseWidget()
 confere(#tarefas == 0 or true, "fechou")
 print(falhas == 0 and "TUDO CERTO" or (falhas .. " FALHA(S)"))

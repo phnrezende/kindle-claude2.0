@@ -135,8 +135,28 @@ end
 
 -- ------------------------------------------------------------------ busca
 
+--- Registra um erro do plugin uma vez so (o desenho roda a cada pagina).
+local avisados = {}
+local function avisar(onde, err)
+    if avisados[onde] then return end
+    avisados[onde] = true
+    logger.warn("Claudinho: erro em", onde, err)
+end
+
+-- o minimo para o painel e o overlay desenharem se ate o "sem sinal" falhar
+local VISTA_MINIMA = {
+    modo = "sem_sinal", grupo = "sem_sinal", titulo = "Claudinho", linha = "", agentes = "", ferramenta = "",
+    descricao = "", antes = "", sessao = { txt = "--", zera = "" }, semana = { txt = "--", zera = "" },
+    tokens_hoje = "--", tokens_hora = "", tokens_media = "", rev = "", idioma = "",
+}
+
 function Claudinho:vista()
-    return E.interpretar(C.dados, os.time(), C)
+    -- um estado inesperado nunca pode quebrar a pagina: na pior hipotese, "sem sinal"
+    local ok, v = pcall(E.interpretar, C.dados, os.time(), C)
+    if ok then return v end
+    avisar("interpretar", v)
+    ok, v = pcall(E.interpretar, nil, os.time(), {})
+    return ok and v or VISTA_MINIMA
 end
 
 function Claudinho:precisa_buscar()
@@ -222,7 +242,10 @@ function Claudinho:receber(r)
 end
 
 function Claudinho:atualizar_vistas()
-    if self.painel then self.painel:novo_estado() end
+    if self.painel then
+        local ok, err = pcall(self.painel.novo_estado, self.painel)
+        if not ok then avisar("painel", err) end
+    end
     self:atualizar_overlay()
 end
 
@@ -266,7 +289,16 @@ function Claudinho:overlay_retangulo()
     return Geom:new{ x = x, y = y, w = w, h = h }, cel
 end
 
+--- Chamado pelo ReaderView a cada pagina: um erro aqui quebraria a leitura.
 function Claudinho:pintar_overlay(bb, x, y)
+    local ok, err = pcall(self.desenhar_overlay, self, bb, x, y)
+    if not ok then
+        self.overlay_pintado = nil
+        avisar("desenho do overlay", err)
+    end
+end
+
+function Claudinho:desenhar_overlay(bb, x, y)
     local visivel, quadro, estilo = self:overlay_alvo()
     self.overlay_pintado = visivel and (quadro .. estilo) or nil
     if not visivel then return end
@@ -278,8 +310,14 @@ function Claudinho:pintar_overlay(bb, x, y)
     self.desenho_overlay:overlay(bb, x + r.x, y + r.y, quadro, cel, estilo)
 end
 
---- Pede para repintar so o cantinho, e so se algo mudou.
+--- Pede para repintar so o cantinho, e so se algo mudou. Chamado depois de cada
+--- busca e de cada opcao do menu; um erro aqui nao pode subir para o KOReader.
 function Claudinho:atualizar_overlay(forcar)
+    local ok, err = pcall(self.pedir_overlay, self, forcar)
+    if not ok then avisar("overlay", err) end
+end
+
+function Claudinho:pedir_overlay(forcar)
     if not self.leitor or self.painel or self.fechado then return end
     if self:opt("overlay_animar") then self.fase = (self.fase or 0) + 1 end
     local visivel, quadro, estilo = self:overlay_alvo()
@@ -316,7 +354,7 @@ function Claudinho:abrir_painel()
     if self.painel then return end
     local Painel = require("claudinho/painel")
     self:manter_acordado(true)
-    self.painel = Painel:new{
+    local ok, painel = pcall(Painel.new, Painel, {
         fonte = self:fonte(),
         ler_estado = function() return self:vista() end,
         rotacao = self:opt("painel_rotacao"),
@@ -326,7 +364,13 @@ function Claudinho:abrir_painel()
             self:manter_acordado(false)
             self:reiniciar(self:opt("intervalo_leitura"))
         end,
-    }
+    })
+    if not ok then
+        avisar("abrir o painel", painel)
+        self:manter_acordado(false)
+        return
+    end
+    self.painel = painel
     UIManager:show(self.painel)
     if not C.dica_mostrada then
         C.dica_mostrada = true

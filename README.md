@@ -163,6 +163,7 @@ kindle-claude2.0/
 │   └── fonts/               Inter Tight e JetBrains Mono (estáticas, OFL)
 ├── tools/
 │   ├── harness/             roda o desenho do plugin fora do Kindle + testes
+│   ├── testes_pc.py         testes do lado do PC (hooks, estado, setup, servidor)
 │   ├── gerar_sprites.py     design/sprites.json -> sprites.lua
 │   └── gerar_fontes.py      fontes variáveis -> pesos estáticos
 ├── design/                  sprites e pixel art do Claudinho chef (do original)

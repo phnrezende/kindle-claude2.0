@@ -188,6 +188,72 @@ ok(e["sessao"] == {"pct": 0}, f"janela vencida vira 0% ({e['sessao']})")
 ok(e["semana"]["pct"] == 64 and "hora" in e["semana"], "a que nao venceu continua igual")
 os.remove(os.path.join(PC, "data", "statusline.json"))
 
+print("statusLine")
+SL = os.path.join(PC, "statusline.py")
+def statusline(dados):
+    return subprocess.run([sys.executable, "-I", SL], input=json.dumps(dados), capture_output=True,
+                          text=True, env=env).stdout.strip()
+arq_sl = os.path.join(PC, "data", "statusline.json")
+futuro = time.time() + 3600
+saida = statusline({"model": {"display_name": "Opus"}, "rate_limits": {
+    "five_hour": {"used_percentage": 40, "resets_at": futuro}, "seven_day": {"used_percentage": 20, "resets_at": futuro}}})
+ok(saida == "Opus | 5h 40% | week 20%", f"linha de status ({saida})")
+statusline({"model": {"display_name": "Opus"}, "rate_limits": {"seven_day": {"used_percentage": 21, "resets_at": futuro}}})
+rl = json.load(open(arq_sl))["rate_limits"]
+ok(rl["five_hour"]["used_percentage"] == 40 and rl["seven_day"]["used_percentage"] == 21,
+   "janela que sumiu do JSON fica guardada; a que veio e atualizada")
+ok(statusline([1, 2]).startswith("Claude |") and statusline("lixo").startswith("Claude |"),
+   "entrada estranha nao quebra a linha (e mantem os limites guardados)")
+# varias sessoes ao mesmo tempo: o arquivo nunca fica pela metade
+grande = json.dumps({"pad": "x" * 200000, "rate_limits": {"five_hour": {"used_percentage": 1, "resets_at": futuro}}})
+ruins, parar = [0], [False]
+def ler_sem_parar():
+    while not parar[0]:
+        try:
+            with open(arq_sl) as f:
+                json.load(f)
+        except FileNotFoundError:
+            pass
+        except ValueError:
+            ruins[0] += 1
+import threading
+t = threading.Thread(target=ler_sem_parar)
+t.start()
+for _ in range(8):
+    ps = [subprocess.Popen([sys.executable, "-I", SL], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=env)
+          for _ in range(6)]
+    for p_ in ps:
+        p_.stdin.write(grande.encode())
+        p_.stdin.close()
+    for p_ in ps:
+        p_.wait()
+parar[0] = True
+t.join()
+ok(ruins[0] == 0, f"6 sessoes gravando juntas: nenhuma leitura pela metade ({ruins[0]})")
+sobras = [n for n in os.listdir(os.path.join(PC, "data")) if n.endswith(".tmp")]
+ok(not sobras, "nenhum arquivo temporario sobrando")
+os.remove(arq_sl)
+
+print("arquivos fora do formato")
+for ruim_state, ruim_status in [([1, 2], "x"), ({"sessions": [1], "tools": {"a": 1}}, {"rate_limits": []}),
+                                ({"sessions": {"a": 5, "b": {"status": "working", "last_event": "ontem"}},
+                                  "tools": [5, {"name": {}}]},
+                                 {"rate_limits": {"five_hour": {"used_percentage": "muito", "resets_at": "amanha"},
+                                                  "seven_day": 7}})]:
+    with open(os.path.join(PC, "data", "state.json"), "w") as f:
+        json.dump(ruim_state, f)
+    with open(os.path.join(PC, "data", "statusline.json"), "w") as f:
+        json.dump(ruim_status, f)
+    out = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--state"],
+                         capture_output=True, text=True, env=env)
+    ok(out.returncode == 0 and json.loads(out.stdout)["v"] == 2, f"estado sai mesmo com {str(ruim_state)[:40]}")
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "/a/b.py"}})
+ok(estado()["ferramenta"] == "Read", "o hook conserta um state.json fora do formato")
+hook({"session_id": 5, "cwd": 7, "hook_event_name": "PreToolUse", "tool_name": 3, "tool_input": "x"})
+ok(json.load(open(os.path.join(PC, "data", "state.json")))["sessions"].get("5") is not None,
+   "evento com tipos estranhos e gravado (session_id e cwd que nao sao texto)")
+os.remove(os.path.join(PC, "data", "statusline.json"))
+
 print("setup: hooks de uma pasta antiga")
 settings_path = os.path.join(home, ".claude", "settings.json")
 morto = '"/usr/bin/python3" "/pasta/que/nao/existe/pc/hook.py"'
@@ -206,7 +272,7 @@ ok("node /meu/hook.js" in cmds, "o hook do usuario continua la")
 ok(all(c.endswith("--claudinho") for c in cmds if "hook.py" in c), "os novos tem a marca")
 ok(len([c for c in st["hooks"]["Stop"] for c in c["hooks"]]) == 1, "sem hook repetido")
 ok("PostToolUseFailure" in st["hooks"], "PostToolUseFailure registrado")
-ok("Replaced 2 old" in r.stdout, "o setup avisa que trocou os antigos")
+ok("Replaced 2 Claudinho hook" in r.stdout, "o setup avisa que trocou os antigos")
 ok(not os.path.exists(os.path.join(PC, "data", "orig_statusline.txt")),
    "statusLine antiga do Claudinho (morta) nao vira a 'sua statusLine'")
 os.remove(settings_path)

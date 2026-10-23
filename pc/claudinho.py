@@ -23,6 +23,7 @@ import glob
 import hashlib
 import hmac
 import json
+import math
 import os
 import socket
 import sys
@@ -70,6 +71,17 @@ def load_config():
     cfg = {"porta": 8787, "token": ""}
     cfg.update(read_json(CONFIG))
     return cfg
+
+
+def num(v, padrao=0.0):
+    """Numero de um campo dos arquivos; um valor estranho vira `padrao`.
+    O state.json e o statusline.json sao gravados pelo hook e pelo Claude Code,
+    mas um arquivo fora do formato nao pode derrubar toda resposta ao Kindle."""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return padrao
+    return n if math.isfinite(n) else padrao
 
 
 def cortar(texto, n):
@@ -177,16 +189,16 @@ def token_stats_cached(now):
 
 def session_view(s, now):
     """(prioridade, modo, desde, ferramenta, descricao) de uma sessao."""
-    last = float(s.get("last_event") or 0)
+    last = num(s.get("last_event"))
     status = s.get("status")
     if status == "waiting":
-        since = float(s.get("waiting_since") or last)
-        asked_tool = now - float(s.get("tool_started") or 0) < 120
+        since = num(s.get("waiting_since"), last) or last
+        asked_tool = now - num(s.get("tool_started")) < 120
         if asked_tool and s.get("tool_name"):
             return 5, "chamando", since, s["tool_name"], s.get("tool_desc", "")
         return 5, "chamando", since, "", ""
     if status == "working":
-        started = float(s.get("tool_started") or 0)
+        started = num(s.get("tool_started"))
         recent = now - started < TOOL_LINGER
         if (s.get("tool_running") and now - started < TOOL_STALE) or recent:
             return 4, "cozinhando", last, s.get("tool_name", ""), s.get("tool_desc", "")
@@ -195,7 +207,7 @@ def session_view(s, now):
         # sem evento nenhum ha muito tempo: foi interrompido e o Stop nao veio
         return 1, "esperando", last, "", ""
     if status == "done":
-        done_at = float(s.get("done_at") or last)
+        done_at = num(s.get("done_at"), last) or last
         if now - done_at < PRATO_SECONDS:
             return 2, "prato", done_at, "", ""
         return 1, "esperando", done_at, "", ""
@@ -204,18 +216,19 @@ def session_view(s, now):
 
 def derive(state, now):
     """Junta todas as sessoes numa so: mostra a mais urgente e conta as ativas."""
-    sessions = state.get("sessions") or {}
+    sessions = state.get("sessions") if isinstance(state.get("sessions"), dict) else {}
+    sessions = {sid: s for sid, s in sessions.items() if isinstance(s, dict)}
     live = [(sid, s) for sid, s in sessions.items()
-            if s.get("status") != "closed" and now - float(s.get("last_event") or 0) < REST_AFTER]
+            if s.get("status") != "closed" and now - num(s.get("last_event")) < REST_AFTER]
     views = [(session_view(s, now), sid, s) for sid, s in live]
     active = sum(1 for v, _, _ in views if v[0] >= 3)
     if not views:
-        last = max([float(s.get("last_event") or 0) for s in sessions.values()] or
-                   [float(state.get("last_event") or 0)])
+        last = max([num(s.get("last_event")) for s in sessions.values()] or
+                   [num(state.get("last_event"))])
         return {"mode": "descansando", "since": last, "tool": "", "desc": "",
                 "active": 0, "project": "", "session": None}
     (_, mode, since, tool, desc), sid, s = max(
-        views, key=lambda v: (v[0][0], float(v[2].get("last_event") or 0)))
+        views, key=lambda v: (v[0][0], num(v[2].get("last_event"))))
     return {"mode": mode, "since": since, "tool": tool, "desc": desc,
             "active": active, "project": s.get("project", ""), "session": sid}
 
@@ -305,27 +318,28 @@ def montar_estado(now=None, demo_mode=None):
     else:
         state, status = read_json(STATE), read_json(STATUS)
         hoje, hora, media = token_stats_cached(now)
+    state = state if isinstance(state, dict) else {}
+    status = status if isinstance(status, dict) else {}
     info = derive(state, now)
 
+    tools = state.get("tools") if isinstance(state.get("tools"), list) else []
+    tools = [t for t in tools if isinstance(t, dict)]
     antes = [cortar(t.get("name", "?"), MAX_FERRAMENTA)
-             for t in reversed(ferramentas_antes(state.get("tools") or [], info)[-4:])]
+             for t in reversed(ferramentas_antes(tools, info)[-4:])]
 
-    rl = status.get("rate_limits") or {}
+    rl = status.get("rate_limits") if isinstance(status.get("rate_limits"), dict) else {}
 
     def limite(key, week):
-        d = rl.get(key) or {}
-        pct = d.get("used_percentage")
+        d = rl.get(key)
+        pct = num(d.get("used_percentage"), None) if isinstance(d, dict) else None
         if pct is None:
             return {"pct": None}
-        try:
-            zerou = float(d.get("resets_at")) <= now
-        except (TypeError, ValueError):
-            zerou = False
-        if zerou:
+        zera = num(d.get("resets_at"), None)
+        if zera is not None and zera <= now:
             # a janela ja virou e o Claude Code nao rodou desde entao (o statusline.json
             # so muda com ele aberto): o uso da janela nova ainda e zero
             return {"pct": 0}
-        return {"pct": int(round(float(pct))), **quando_zera(d.get("resets_at"), week)}
+        return {"pct": int(round(pct)), **quando_zera(zera, week)}
 
     estado = {
         "v": VERSAO,

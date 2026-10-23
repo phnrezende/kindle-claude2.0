@@ -94,6 +94,14 @@ local function limite(t)
     return { pct = pct, txt = pct and string.format("%.0f%%", pct) or "--", zera = zera }
 end
 
+--- So texto (ou numero) vira texto; o resto (tabela, booleano, nil) vira "".
+--- Este codigo roda a cada pagina do livro, entao nada aqui pode dar erro.
+local function texto(v)
+    if type(v) == "string" then return v end
+    if type(v) == "number" then return tostring(v) end
+    return ""
+end
+
 --- O que aparece na barra quando nao ha ferramenta rodando.
 local function sem_ferramenta(modo)
     if modo == "cozinhando" then return L.t("pensando") end
@@ -147,23 +155,24 @@ function E.interpretar(dados, agora, info)
     -- com varias sessoes, o painel mostra "3 AGENTES" no topo (na linha nao cabia)
     local agentes = (not sem_sinal and ativos > 1) and L.t("varios_agentes", ativos) or ""
 
-    local ferramenta = (not sem_sinal and type(d.ferramenta) == "string" and d.ferramenta) or ""
+    local ferramenta = sem_sinal and "" or texto(d.ferramenta)
     local descricao
     if sem_sinal then
         descricao = (info.falhas or 0) >= 3 and L.t("sem_conexao") or L.t("pc_desligado")
     else
-        descricao = type(d.descricao) == "string" and d.descricao or ""
+        descricao = texto(d.descricao)
         if ferramenta == "" and (descricao == "" or ANTIGOS[descricao]) then
             descricao = sem_ferramenta(modo)
         end
-        if ativos > 1 and (d.projeto or "") ~= "" and ferramenta ~= "" then
-            descricao = descricao .. " · " .. d.projeto     -- varios agentes: de qual projeto e
+        local projeto = texto(d.projeto)
+        if ativos > 1 and projeto ~= "" and ferramenta ~= "" then
+            descricao = descricao .. " · " .. projeto       -- varios agentes: de qual projeto e
         end
     end
 
     local antes = {}
     for _, nome in ipairs(type(d.antes) == "table" and d.antes or {}) do
-        antes[#antes + 1] = tostring(nome)
+        if texto(nome) ~= "" then antes[#antes + 1] = texto(nome) end
     end
     local tok = type(d.tokens) == "table" and d.tokens or {}
 
@@ -181,7 +190,7 @@ function E.interpretar(dados, agora, info)
         tokens_hoje = E.fmt_tokens(tonumber(tok.hoje)),
         tokens_hora = L.t("tokens_hora", E.fmt_tokens(tonumber(tok.hora))),
         tokens_media = L.t("tokens_media", E.fmt_tokens(tonumber(tok.media))),
-        rev = d.rev,
+        rev = texto(d.rev),
         idioma = L.atual(),
     }
 end
