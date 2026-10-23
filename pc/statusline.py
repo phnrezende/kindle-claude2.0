@@ -36,6 +36,59 @@ def linha_antiga(cmd, raw):
     return r.stdout
 
 
+def tentar(fn, *args):
+    """No Windows, abrir ou trocar um arquivo que outra sessao esta lendo ou trocando
+    da PermissionError por um instante. Tenta de novo por ate ~0,5 s."""
+    for i in range(20):
+        try:
+            return fn(*args)
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.025)
+
+
+def ler_json(caminho):
+    with open(caminho, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def guardar(data):
+    """Junta os rate_limits guardados com os novos e grava statusline.json inteiro
+    de uma vez (arquivo temporario + os.replace)."""
+    os.makedirs(DATA, exist_ok=True)
+    try:
+        old = tentar(ler_json, STATUS)
+    except (FileNotFoundError, ValueError):
+        old = {}
+    # qualquer outro erro sobe: sem ler o arquivo nao da para regravar sem perder
+    # os rate_limits guardados, entao fica o que ja estava la
+    if not isinstance(old, dict):
+        old = {}
+    # rate_limits so aparece depois da primeira resposta, e o Claude Code tira cada
+    # janela (5 h, semana) do JSON quando ela vence. Guarda cada uma separadamente:
+    # vencida, o agente mostra 0% em vez de "--".
+    novo = data.get("rate_limits") if isinstance(data.get("rate_limits"), dict) else {}
+    antigo = old.get("rate_limits") if isinstance(old.get("rate_limits"), dict) else {}
+    juntos = dict(antigo)
+    juntos.update(novo)
+    if juntos:
+        data["rate_limits"] = juntos
+    data["saved_at"] = time.time()
+    # um nome por processo: varias sessoes rodam a statusLine ao mesmo tempo
+    tmp = f"{STATUS}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        tentar(os.replace, tmp, STATUS)
+    finally:
+        # se a troca desistiu, o temporario nao pode ficar para tras
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def main():
     try:
         # o Claude Code manda UTF-8; no Windows o stdin de texto usaria outra codificacao
@@ -50,29 +103,7 @@ def main():
         data = {}
 
     try:
-        os.makedirs(DATA, exist_ok=True)
-        try:
-            with open(STATUS, encoding="utf-8") as f:
-                old = json.load(f)
-        except Exception:
-            old = {}
-        if not isinstance(old, dict):
-            old = {}
-        # rate_limits so aparece depois da primeira resposta, e o Claude Code tira cada
-        # janela (5 h, semana) do JSON quando ela vence. Guarda cada uma separadamente:
-        # vencida, o agente mostra 0% em vez de "--".
-        novo = data.get("rate_limits") if isinstance(data.get("rate_limits"), dict) else {}
-        antigo = old.get("rate_limits") if isinstance(old.get("rate_limits"), dict) else {}
-        juntos = dict(antigo)
-        juntos.update(novo)
-        if juntos:
-            data["rate_limits"] = juntos
-        data["saved_at"] = time.time()
-        # um nome por processo: varias sessoes rodam a statusLine ao mesmo tempo
-        tmp = f"{STATUS}.{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.replace(tmp, STATUS)
+        guardar(data)
     except Exception:
         pass
 

@@ -33,9 +33,6 @@ O `fumaca.lua` confere: menu registrado, linha do topo no ReaderView (centraliza
 O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
 
 O uso da conta é testado contra uma Anthropic de mentira (um servidor local; `CLAUDINHO_USO_URL` e `CLAUDINHO_TOKEN_URL` trocam os endereços), com um `.credentials.json` falso no HOME de teste: token válido (só consulta), vencido (renova como o Claude Code, grava só o `claudeAiOauth`, faz backup, mantém as permissões), recusado antes de vencer (renova e tenta de novo), renovação recusada (volta para a statusLine e pede `/login`), sem login e com `"uso_da_conta": false`.
-
-No Windows, o teste "6 sessões gravando juntas" da statusLine falha: a troca do `statusline.json` dá `PermissionError` quando outra sessão está lendo, e sobra um arquivo temporário. No Linux passa.
-
 ## Regerar sprites e fontes
 
 ```sh
