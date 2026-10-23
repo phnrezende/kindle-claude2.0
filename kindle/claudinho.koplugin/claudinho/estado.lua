@@ -92,13 +92,13 @@ local function limite(t)
 end
 
 --[[--
-Calcula a diferenca entre o relogio do Kindle e o do PC no momento da leitura.
-`idade` e quantos segundos fazia que o PC tinha enviado (0 no modo local).
+Calcula a diferenca entre o relogio do Kindle e o do PC no momento da leitura
+(o PC monta o estado na hora em que responde).
 ]]
-function E.desvio(dados, recebido_em, idade)
+function E.desvio(dados, recebido_em)
     local agora_pc = type(dados) == "table" and tonumber(dados.agora)
     if not agora_pc then return 0 end
-    return recebido_em - (agora_pc + (idade or 0))
+    return recebido_em - agora_pc
 end
 
 --[[--
@@ -106,21 +106,20 @@ Monta o que mostrar.
 
 @param dados tabela do JSON do PC (ou nil se nunca chegou nada)
 @param agora os.time() do Kindle
-@param info { recebido_em, idade, desvio, falhas } da ultima leitura
+@param info { recebido_em, desvio, falhas } da ultima leitura
    recebido_em: os.time() do Kindle na ultima leitura que deu certo
-   idade: segundos que o estado ja tinha quando chegou (o relay informa)
    desvio: relogio do Kindle menos o do PC (ver E.desvio)
    falhas: leituras seguidas que falharam
-Tudo que depende de hora e calculado no relogio do PC, entao um Kindle com a
-hora errada nao vira "sem sinal" nem mostra "ha 3 h" a toa.
+O "ha X min" e calculado no relogio do PC, entao um Kindle com a hora errada
+nao mostra "ha 3 h" a toa.
 ]]
 function E.interpretar(dados, agora, info)
     info = info or {}
     local d = type(dados) == "table" and dados or {}
     local modo = TEXTOS[d.modo] and d.modo or "descansando"
     local agora_pc = agora - (info.desvio or 0)
-    local idade = info.recebido_em and ((info.idade or 0) + (agora - info.recebido_em)) or nil
-    local sem_sinal = dados == nil or d.pc_offline
+    local idade = info.recebido_em and (agora - info.recebido_em) or nil
+    local sem_sinal = dados == nil
         or (idade and idade > E.SEM_SINAL_APOS)
         or (info.falhas or 0) >= 3
     local ha = (tonumber(d.desde) or 0) > 0 and (agora_pc - tonumber(d.desde)) or nil

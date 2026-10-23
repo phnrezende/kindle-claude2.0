@@ -34,7 +34,7 @@ local dados = assert(json.decode(f:read("*a")))
 f:close()
 local k = tonumber(args[3]) or 1
 local agora = tonumber(dados.agora) or os.time()
-local v = E.interpretar(dados, agora, { recebido_em = agora, idade = 0, desvio = E.desvio(dados, agora, 0) })
+local v = E.interpretar(dados, agora, { recebido_em = agora, desvio = E.desvio(dados, agora) })
 local data, hora = E.data_hora(agora)
 if args[4] then hora = args[4] end
 if args[5] then data = args[5] end

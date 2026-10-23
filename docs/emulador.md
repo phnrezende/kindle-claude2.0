@@ -1,6 +1,6 @@
 # Testar no computador (emulador do KOReader)
 
-O KOReader tem uma versão para Linux que roda numa janela. O plugin é o mesmo do Kindle, então dá para testar tudo antes de copiar para o aparelho: o overlay na leitura, o painel, o toque para voltar e os dois modos de conexão.
+O KOReader tem uma versão para Linux que roda numa janela. O plugin é o mesmo do Kindle, então dá para testar tudo antes de copiar para o aparelho: o overlay na leitura, o painel, o toque para voltar e a conexão com o agente.
 
 Funciona numa máquina virtual Linux (Ubuntu, Debian, Fedora…) ou num Linux de verdade. No macOS também existe KOReader, mas este guia usa Linux.
 
@@ -32,7 +32,7 @@ ln -s "$PWD/kindle/claudinho.koplugin" ~/.config/koreader/plugins/
 Gere a configuração apontando para a própria VM (sem mexer no Claude Code):
 
 ```sh
-python3 pc/setup.py --modo local --ip 127.0.0.1 --sem-hooks
+python3 pc/setup.py --sem-perguntas --ip 127.0.0.1 --sem-hooks
 ```
 
 Deixe o agente rodando em outro terminal, com um estado fictício:
@@ -69,26 +69,7 @@ Livros para testar: qualquer EPUB de domínio público, por exemplo do [Projeto 
 
 Dica: para não esperar 60 s entre buscas, use **Claudinho → Atualizar a cada → Lendo → 30 segundos**.
 
-## 6. Testar o modo remoto sem publicar nada
-
-O relay também roda localmente no Node, com um Durable Object simulado em memória:
-
-```sh
-TOKEN_PC=pc TOKEN_KINDLE=kindle node relay/servidor_teste.mjs 8790
-```
-
-Em outro terminal, configure o agente para enviar para ele (o setup só aceita `https://`, então edite à mão):
-
-```sh
-cat > pc/config.json <<'EOF'
-{"modo": "remoto", "token": "kindle", "relay_url": "http://localhost:8790", "token_pc": "pc"}
-EOF
-python3 pc/claudinho.py --demo cozinhando
-```
-
-No KOReader: **Conexão → Endereço** = `http://127.0.0.1:8790/estado`, **Token** = `kindle`. Ao parar o agente com Ctrl+C, ele avisa o relay, e o Kindle mostra "PC desligado?" na próxima busca.
-
-## 7. Com o Claude Code de verdade
+## 6. Com o Claude Code de verdade
 
 Rode o setup completo (`python3 pc/setup.py`), reinicie o Claude Code e use normalmente. O overlay e o painel passam a seguir as suas sessões.
 

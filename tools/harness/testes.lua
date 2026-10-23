@@ -36,7 +36,7 @@ local agora = 1000000
 local d = { modo = "chamando", desde = agora - 40, agora = agora, ferramenta = "Bash", descricao = "rm -rf build/",
     ativos = 1, antes = { "Edit", "Read" }, sessao = { pct = 11, zera = "zera às 15:00" }, semana = {},
     tokens = { hoje = 2480000, hora = 420000 }, rev = "abc" }
-local info = { recebido_em = agora, idade = 0, desvio = E.desvio(d, agora, 0), falhas = 0 }
+local info = { recebido_em = agora, desvio = E.desvio(d, agora), falhas = 0 }
 local v = E.interpretar(d, agora, info)
 igual(v.titulo, "Te chamando!", "titulo")
 igual(v.linha, "esperando você há 40s", "linha")
@@ -48,19 +48,19 @@ igual(v.tokens_media, "média --/dia", "media sem dado")
 
 print("relogio do Kindle errado")
 local kindle = agora + 3600         -- Kindle adiantado 1 hora
-local info2 = { recebido_em = kindle, idade = 0, desvio = E.desvio(d, kindle, 0), falhas = 0 }
+local info2 = { recebido_em = kindle, desvio = E.desvio(d, kindle), falhas = 0 }
 v = E.interpretar(d, kindle + 20, info2)
 igual(v.modo, "chamando", "nao vira 'sem sinal' por causa do relogio")
 igual(v.linha, "esperando você há 1 min", "conta o tempo pelo relogio do PC")
 
 print("sem sinal")
-v = E.interpretar(d, agora + 700, { recebido_em = agora, idade = 0, desvio = 0, falhas = 0 })
+v = E.interpretar(d, agora + 700, { recebido_em = agora, desvio = 0, falhas = 0 })
 igual(v.modo, "sem_sinal", "estado parado ha mais de 10 min")
 igual(v.linha, "última notícia há 11 min", "conta desde a ultima noticia")
-v = E.interpretar(d, agora + 5, { recebido_em = agora, idade = 0, desvio = 0, falhas = 3 })
+v = E.interpretar(d, agora + 5, { recebido_em = agora, desvio = 0, falhas = 3 })
 igual(v.descricao, "sem conexão", "3 falhas seguidas")
-local off = { modo = "cozinhando", pc_offline = true, agora = agora, desde = agora }
-igual(E.interpretar(off, agora, { recebido_em = agora }).descricao, "PC desligado?", "PC avisou que saiu")
+local kindle_atrasado = { recebido_em = agora - 5000, desvio = -5000, falhas = 0 }
+igual(E.interpretar(d, agora - 5000 + 30, kindle_atrasado).modo, "chamando", "Kindle atrasado nao vira 'sem sinal'")
 igual(E.interpretar(nil, agora, {}).modo, "sem_sinal", "nunca recebeu nada")
 
 print("varios agentes")
@@ -80,9 +80,8 @@ igual(E.sequencia("descansando")[2], "descansando_2", "descansando")
 igual(E.quadro_parado("prato"), "prato_1", "quadro parado")
 
 print("busca: empacotar e desempacotar")
-local r = Busca._desempacotar(Busca._empacotar({ codigo = 200, idade = 12, etag = '"abc"', corpo = 'linha1\nlinha2' }))
+local r = Busca._desempacotar(Busca._empacotar({ codigo = 200, etag = '"abc"', corpo = 'linha1\nlinha2' }))
 igual(r.codigo, 200, "codigo")
-igual(r.idade, 12, "idade")
 igual(r.etag, '"abc"', "etag")
 igual(r.corpo, "linha1\nlinha2", "corpo com quebras de linha")
 r = Busca._desempacotar(Busca._empacotar({ erro = "tempo\nesgotado" }))

@@ -9,6 +9,9 @@ O desenho e a lógica do plugin rodam fora do Kindle, num LuaJIT puro, com o Bli
 - a `libfreetype.so.6` do sistema (o `boot.lua` cria o link em `libs/`, na pasta onde você roda).
 
 ```sh
+# lado do PC (so Python): hooks, privacidade das descricoes, tokens, setup e servidor
+python3 tools/testes_pc.py
+
 export KO=~/src/koreader KOBASE=~/src/koreader-base
 
 # logica pura: formatos, estado, relogios, json, empacotamento
