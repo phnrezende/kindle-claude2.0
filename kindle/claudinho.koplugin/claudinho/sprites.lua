@@ -3,7 +3,6 @@
 return {
     largura = 36,
     altura = 24,
-    recorte = { x = 0, y = 0, w = 36, h = 24 },
     quadros = {
         cebola_1 = {
             "....................................",

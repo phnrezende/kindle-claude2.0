@@ -4,7 +4,7 @@
 
 Igual ao [kindle-claude](https://github.com/guithepc/kindle-claude), de onde vem esta parte:
 
-- **Hooks** (`pc/hook.py`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure` e `SessionEnd` gravam cada sessão, pelo `session_id`, em `pc/data/state.json`. Uma trava de arquivo deixa vários agentes escreverem ao mesmo tempo (também no Windows).
+- **Hooks** (`pc/hook.py`): `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure` e `SessionEnd` gravam cada sessão, pelo `session_id`, em `pc/data/state.json`. Uma trava de arquivo deixa vários agentes escreverem ao mesmo tempo (também no Windows).
 - Do `Notification`, só contam os avisos em que o Claude espera uma resposta sua: pedido de permissão e perguntas (`permission_prompt`, `elicitation_dialog`…). O aviso de "parado há 60 s" (`idle_prompt`) e os outros são ignorados, para o Kindle não ficar "Te chamando!" depois de cada resposta.
 - **statusLine** (`pc/statusline.py`): guarda `rate_limits.five_hour` e `rate_limits.seven_day` em `pc/data/statusline.json`, e continua mostrando a statusLine que você já tinha.
 - **Tokens**: o agente soma `input + output + cache_creation + cache_read` dos históricos em `~/.claude/projects/**/*.jsonl`, sem contar duas vezes a mesma mensagem, a cada 30 s no máximo. Cada arquivo é lido só a partir de onde parou da última vez.
@@ -27,9 +27,13 @@ O agente (`pc/claudinho.py`) junta as sessões, escolhe a mais urgente (pedindo 
 
 O estado leva só dados, nenhuma frase pronta (versão 2 do formato). As frases ("Cozinhando…", "pensando…", "zera às 15:00") são montadas no Kindle, no idioma escolhido, por `claudinho/textos.lua`. Por isso trocar o idioma não depende do PC. Um agente antigo (versão 1, que mandava as frases em português) continua funcionando.
 
+Se o horário de reset de um limite já passou, o agente manda 0%. O `statusline.json` só muda com o Claude Code aberto, e sem essa regra o Kindle continuaria mostrando o uso da janela que já terminou.
+
 O `rev` ignora o `agora` e arredonda os números para a precisão que o painel mostra (`2,5 mi`, `32 mil`). Assim, o Kindle só redesenha quando a tela realmente mudaria.
 
-Uma sessão "trabalhando" sem nenhum evento há mais de 10 minutos passa a contar como parada. O `Stop` não dispara quando você interrompe com Esc, e um erro da API dispara o `StopFailure`; sem isso, o Kindle ficaria "Cozinhando…" por meia hora. Uma ferramenta que roda mais de 10 minutos seguidos (um build longo, por exemplo) também cai nessa regra.
+Uma sessão "trabalhando" sem nenhum evento há mais de 10 minutos passa a contar como parada. O `Stop` não dispara quando você interrompe com Esc, e um erro da API dispara o `StopFailure`; sem isso, o Kindle ficaria "Cozinhando…" por meia hora. Uma ferramenta que roda mais de 10 minutos seguidos (um build longo, por exemplo) também cai nessa regra. Uma ferramenta que termina com erro (testes falhando, por exemplo) dispara `PostToolUseFailure` em vez de `PostToolUse`, e conta como terminada do mesmo jeito.
+
+Depois que você aprova um pedido de permissão, o Kindle continua em "Te chamando!" até a ferramenta terminar: o Claude Code não avisa os hooks quando a permissão é dada, só quando a ferramenta acaba. Com ferramentas rápidas isso nem aparece; com um build longo, sim.
 
 ## O que sai do PC
 
@@ -48,6 +52,7 @@ Na `descricao` vai só:
 - o nome do arquivo (Read, Edit, Write…), sem a pasta;
 - o padrão de busca (Grep, Glob);
 - o domínio de uma URL (WebFetch), sem o caminho;
+- de uma ferramenta MCP (Linear, Gmail, Notion…), só o nome da função (`create_issue`), porque os campos dela costumam ser conteúdo seu, como o texto de uma issue ou o assunto de um e-mail;
 - a descrição curta que o Claude dá ao comando (Bash) ou à tarefa. Se o comando não tiver descrição, vai só o nome do programa (`npm …`), nunca o comando com os argumentos.
 
 Prompts, textos de pesquisa, comandos inteiros e conteúdo de arquivos não saem do PC. Cada texto é cortado em até 80 caracteres.

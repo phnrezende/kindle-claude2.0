@@ -56,7 +56,7 @@ EMULATE_READER_W=600 EMULATE_READER_H=800 EMULATE_READER_FLASH=1 ./koreader-*.Ap
 | Teste | Como | Esperado |
 |---|---|---|
 | Menu | clique no topo da tela → aba Ferramentas | item **Claudinho (Claude Code)** |
-| Conexão | Claudinho → Conexão → Testar a conexão agora | "Conectado (local). Claude: Te chamando!" |
+| Conexão | Claudinho → Conexão → Testar a conexão agora | "Conectado. Claude: Te chamando!" |
 | Overlay | abra um livro (qualquer EPUB ou PDF) | Claudinho no canto superior direito; preto no demo `chamando` |
 | Só o canto atualiza | troque a demo e espere até 1 min (ou use "Testar a conexão") | com o `EMULATE_READER_FLASH`, só o cantinho pisca |
 | Virar a página | vire algumas páginas | o Claudinho continua lá, sem piscar a mais |

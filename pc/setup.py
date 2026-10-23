@@ -22,6 +22,7 @@ valendo.)
 """
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -38,10 +39,14 @@ SETTINGS = os.path.expanduser("~/.claude/settings.json")
 PY = sys.executable or "python3"
 HOOK_PATH = os.path.join(BASE, "hook.py")
 STATUS_PATH = os.path.join(BASE, "statusline.py")
-HOOK_CMD = f'"{PY}" "{HOOK_PATH}"'
-STATUS_CMD = f'"{PY}" "{STATUS_PATH}"'
-EVENTS = {"PreToolUse": "*", "PostToolUse": "*", "UserPromptSubmit": None,
+# a marca no fim deixa reconhecer os comandos do Claudinho mesmo se a pasta mudar
+MARCA = "--claudinho"
+HOOK_CMD = f'"{PY}" "{HOOK_PATH}" {MARCA}'
+STATUS_CMD = f'"{PY}" "{STATUS_PATH}" {MARCA}'
+EVENTS = {"PreToolUse": "*", "PostToolUse": "*", "PostToolUseFailure": "*", "UserPromptSubmit": None,
           "Notification": None, "Stop": None, "StopFailure": None, "SessionEnd": None}
+# um comando como os nossos: "python" ".../pc/hook.py"
+CAMINHO_PC = re.compile(r'"([^"]*[\\/]pc[\\/](hook|statusline)\.py)"')
 
 sys.path.insert(0, BASE)
 import claudinho  # noqa: E402  (mesmo diretorio)
@@ -88,8 +93,27 @@ def titulo(txt):
 
 # ------------------------------------------------------------------ hooks
 
+def comando_nosso(cmd, arquivo):
+    """O comando roda o `arquivo` ("hook.py" ou "statusline.py") do Claudinho?
+
+    Vale para esta pasta, para os comandos com a marca e para instalacoes de uma
+    pasta que nao existe mais (o repositorio mudou de lugar): esses comandos so
+    dariam erro, entao sao trocados pelos novos."""
+    cmd = cmd or ""
+    if os.path.join(BASE, arquivo) in cmd or (MARCA in cmd and arquivo in cmd):
+        return True
+    m = CAMINHO_PC.search(cmd)
+    return bool(m and m.group(2) + ".py" == arquivo and not os.path.exists(m.group(1)))
+
+
 def is_ours(entry):
-    return any(HOOK_PATH in (h.get("command") or "") for h in entry.get("hooks", []))
+    return any(comando_nosso(h.get("command"), "hook.py") for h in entry.get("hooks", []))
+
+
+def antigos(entries):
+    """Quantos desses hooks sao do Claudinho, mas de outra pasta."""
+    return sum(1 for e in entries for h in e.get("hooks", [])
+               if comando_nosso(h.get("command"), "hook.py") and HOOK_PATH not in (h.get("command") or ""))
 
 
 def load_settings():
@@ -115,8 +139,13 @@ def instalar_hooks():
     titulo("Claude Code hooks and statusLine")
     cfg = load_settings()
     hooks = cfg.setdefault("hooks", {})
+    velhos = sum(antigos(lst) for lst in hooks.values())
+    for event in list(hooks):                     # tira os nossos de todos os eventos
+        hooks[event] = [e for e in hooks[event] if not is_ours(e)]
+        if not hooks[event]:
+            del hooks[event]
     for event, matcher in EVENTS.items():
-        lst = [e for e in hooks.get(event, []) if not is_ours(e)]
+        lst = hooks.get(event, [])
         entry = {"hooks": [{"type": "command", "command": HOOK_CMD}]}
         if matcher:
             entry["matcher"] = matcher
@@ -124,8 +153,10 @@ def instalar_hooks():
         hooks[event] = lst
 
     os.makedirs(DATA, exist_ok=True)
+    if velhos:
+        print(f"Replaced {velhos} old Claudinho hook(s) that pointed to a folder that no longer exists.")
     current = (cfg.get("statusLine") or {}).get("command", "")
-    if current and STATUS_PATH not in current:
+    if current and not comando_nosso(current, "statusline.py"):
         with open(ORIG, "w", encoding="utf-8") as f:
             f.write(current)
         print("Your old statusLine was saved and will keep showing.")
@@ -143,7 +174,7 @@ def remover_hooks():
             del hooks[event]
     if not hooks:
         cfg.pop("hooks", None)
-    if STATUS_PATH in (cfg.get("statusLine") or {}).get("command", ""):
+    if comando_nosso((cfg.get("statusLine") or {}).get("command", ""), "statusline.py"):
         if os.path.exists(ORIG):
             cfg["statusLine"] = {"type": "command",
                                  "command": open(ORIG, encoding="utf-8").read().strip()}

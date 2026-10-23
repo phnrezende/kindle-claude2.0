@@ -324,12 +324,6 @@ function D:relogio(bb, hora)
     self:texto(bb, 30, 486, hora, "inter900", 92, self.cor.branco, 84, -4.6)
 end
 
-function D:regiao_relogio_px()
-    local r = D.REGIAO_RELOGIO
-    local x, y = self:px(r.x), self:px(r.y)
-    return { x = x, y = y, w = self:px(r.x + r.w) - x, h = self:px(r.y + r.h) - y }
-end
-
 -- ------------------------------------------------------------------ overlay
 
 D.ESTILOS = {

@@ -175,7 +175,8 @@ kindle-claude2.0/
 - O % de uso só existe nos planos Pro/Max, e aparece depois da primeira resposta da sessão.
 - O total de tokens inclui leitura de cache, por isso fica alto.
 - Só funciona com o Kindle e o PC na mesma rede. Wi-Fi de visitante ou corporativa que isola os aparelhos bloqueia a conexão.
-- O estado vai sem criptografia (HTTP) pela rede de casa: nomes de ferramentas, de arquivos, do projeto e a descrição curta do comando. Comandos inteiros, prompts e conteúdo de arquivos não saem do PC. Veja [docs/como-funciona.md](docs/como-funciona.md#o-que-sai-do-pc).
+- O estado vai sem criptografia (HTTP) pela rede de casa: nomes de ferramentas, de arquivos, do projeto e a descrição curta do comando. Comandos inteiros, prompts, campos de ferramentas MCP e conteúdo de arquivos não saem do PC. Veja [docs/como-funciona.md](docs/como-funciona.md#o-que-sai-do-pc).
+- Depois que você aprova uma permissão, o Kindle continua "Te chamando!" até a ferramenta terminar, porque o Claude Code não avisa quando a permissão é dada.
 - Precisa do KOReader. Livros com DRM da Amazon não abrem nele.
 - O overlay pode cobrir um pedacinho do texto em margens apertadas. Aumente a margem superior do livro ou escolha outro canto.
 

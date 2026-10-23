@@ -29,6 +29,8 @@ curl -H "Authorization: Bearer SEU_TOKEN" http://localhost:8787/estado.json
 | Fantasmas no painel | e-ink | o painel faz refresh completo a cada 10 trocas; trocar de estado também limpa |
 | Sempre "sem conexão" numa Wi-Fi de visitante ou do trabalho | a rede isola os aparelhos | use a rede de casa, ou o roteador do celular com o PC e o Kindle nele |
 | "Te chamando!" sem nada pedindo permissão | versão antiga do Claude Code, sem `notification_type` | atualize o Claude Code |
+| "Te chamando!" depois de aprovar | a ferramenta aprovada ainda está rodando | é normal: volta a "Cozinhando…" quando ela terminar |
+| Moveu a pasta do repositório e o Claude Code mostra erro de hook | os hooks apontam para a pasta antiga | rode `python3 pc/setup.py` de novo na pasta nova: ele troca os hooks antigos |
 
 ## Desfazer
 

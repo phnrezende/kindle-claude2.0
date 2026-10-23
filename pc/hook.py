@@ -8,6 +8,8 @@ Eventos usados:
   UserPromptSubmit -> cozinhando (pensando)
   PreToolUse       -> ferramenta rodando
   PostToolUse      -> ferramenta terminou
+  PostToolUseFailure -> ferramenta terminou com erro (sem isso, um teste que
+                      falha deixava a ferramenta "rodando")
   Notification     -> precisa de voce (so pedido de permissao ou pergunta;
                       o aviso de "parado ha 60 s" e os outros sao ignorados)
   Stop             -> terminou (prato pronto, depois esperando)
@@ -15,8 +17,10 @@ Eventos usados:
   SessionEnd       -> sessao fechada
 
 Privacidade: para o Kindle vai so o nome do arquivo, o padrao de busca, o
-dominio de uma URL ou a descricao curta que o Claude da ao comando. O comando
-em si, prompts e textos de busca nao saem daqui.
+dominio de uma URL ou a descricao curta que o Claude da ao comando. De uma
+ferramenta MCP (Linear, Gmail, Notion...) vai so o nome da funcao, porque os
+campos dela costumam ser conteudo seu. O comando em si, prompts e textos de
+busca nao saem daqui.
 """
 import json
 import os
@@ -145,16 +149,19 @@ def update(state, event, now):
         s["project"] = os.path.basename(cwd.rstrip("/\\")) or cwd
 
     if name == "PreToolUse":
-        tool, fn = display_name(event.get("tool_name", "?"))
-        desc = short_desc(event.get("tool_name", ""), event.get("tool_input"))
-        if fn:
-            desc = cortar(f"{fn} {desc}")
+        nome = str(event.get("tool_name") or "?")
+        tool, fn = display_name(nome)
+        if nome.startswith("mcp__"):
+            # MCP: os campos (description, subject, title...) sao conteudo, nao descricao
+            desc = cortar(fn)
+        else:
+            desc = short_desc(nome, event.get("tool_input"))
         s.update(status="working", tool_running=True, tool_name=tool,
                  tool_desc=desc, tool_started=now)
         tools = state.setdefault("tools", [])
         tools.append({"name": tool, "desc": desc, "t": now, "session": sid})
         state["tools"] = tools[-MAX_TOOLS:]
-    elif name == "PostToolUse":
+    elif name in ("PostToolUse", "PostToolUseFailure"):
         s.update(status="working", tool_running=False)
     elif name == "UserPromptSubmit":
         s.update(status="working", tool_running=False)

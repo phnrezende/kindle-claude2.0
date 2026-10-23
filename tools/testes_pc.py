@@ -151,6 +151,66 @@ os.remove(arq)
 claudinho.token_stats()
 ok(arq not in claudinho._tok_cache, "arquivo apagado sai do cache")
 
+print("ferramenta que falha, MCP e varias sessoes")
+limpar()
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+      "tool_input": {"command": "npm test", "description": "Rodar os testes"}})
+hook({**base, "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "x"})
+hook({**base, "hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "error": "exit 1"})
+e = estado()
+ok(e["modo"] == "cozinhando" and e["ferramenta"] == "Bash", "PostToolUseFailure: volta a cozinhando, sem 'chamando'")
+st = json.load(open(os.path.join(PC, "data", "state.json")))["sessions"]["a"]
+ok(st["status"] == "working" and st["tool_running"] is False, "e a ferramenta deixa de estar rodando")
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "mcp__linear__create_issue",
+      "tool_input": {"title": "Bug", "description": "Cliente ACME reclamou do contrato"}})
+e = estado()
+ok(e["ferramenta"] == "mcp:linear" and e["descricao"] == "create_issue", f"MCP manda so a funcao ({e['descricao']!r})")
+ok("ACME" not in json.dumps(e) and "Bug" not in json.dumps(e), "campos do MCP nao saem")
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "mcp__servidor",
+      "tool_input": {"description": "segredo"}})
+ok("segredo" not in json.dumps(estado()), "MCP sem nome de funcao tambem nao le os campos")
+limpar()
+A, B = {"session_id": "A", "cwd": "/x/a"}, {"session_id": "B", "cwd": "/x/b"}
+hook({**A, "hook_event_name": "PreToolUse", "tool_name": "Grep", "tool_input": {"pattern": "x"}})
+hook({**A, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"description": "Rodar os testes"}})
+hook({**A, "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "x"})
+hook({**B, "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "/x/b/main.py"}})
+e = estado()
+ok(e["ferramenta"] == "Bash" and e["antes"] == ["Read", "Grep"],
+   f"varias sessoes: 'antes' sem a ferramenta da barra ({e['antes']})")
+
+print("limite que ja zerou")
+with open(os.path.join(PC, "data", "statusline.json"), "w") as f:
+    json.dump({"rate_limits": {"five_hour": {"used_percentage": 87, "resets_at": time.time() - 7200},
+                               "seven_day": {"used_percentage": 64, "resets_at": time.time() + 86400}}}, f)
+e = estado()
+ok(e["sessao"] == {"pct": 0}, f"janela vencida vira 0% ({e['sessao']})")
+ok(e["semana"]["pct"] == 64 and "hora" in e["semana"], "a que nao venceu continua igual")
+os.remove(os.path.join(PC, "data", "statusline.json"))
+
+print("setup: hooks de uma pasta antiga")
+settings_path = os.path.join(home, ".claude", "settings.json")
+morto = '"/usr/bin/python3" "/pasta/que/nao/existe/pc/hook.py"'
+json.dump({"hooks": {
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": morto}]},
+                   {"matcher": "Bash", "hooks": [{"type": "command", "command": "node /meu/hook.js"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": morto}]}]},
+    "statusLine": {"type": "command", "command": '"/usr/bin/python3" "/pasta/que/nao/existe/pc/statusline.py"'}},
+    open(settings_path, "w"))
+r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--no-prompt", "--ip", "127.0.0.1"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+st = json.load(open(settings_path))
+cmds = [h["command"] for lst in st["hooks"].values() for e in lst for h in e["hooks"]]
+ok(not any("nao/existe" in c for c in cmds), "hooks da pasta antiga foram trocados")
+ok("node /meu/hook.js" in cmds, "o hook do usuario continua la")
+ok(all(c.endswith("--claudinho") for c in cmds if "hook.py" in c), "os novos tem a marca")
+ok(len([c for c in st["hooks"]["Stop"] for c in c["hooks"]]) == 1, "sem hook repetido")
+ok("PostToolUseFailure" in st["hooks"], "PostToolUseFailure registrado")
+ok("Replaced 2 old" in r.stdout, "o setup avisa que trocou os antigos")
+ok(not os.path.exists(os.path.join(PC, "data", "orig_statusline.txt")),
+   "statusLine antiga do Claudinho (morta) nao vira a 'sua statusLine'")
+os.remove(settings_path)
+
 print("setup e servidor")
 r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--sem-perguntas", "--ip", "127.0.0.1",
                     "--porta", "8799"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
@@ -197,6 +257,14 @@ try:
 finally:
     srv.terminate()
     srv.wait()
+
+srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--port", "8797"],
+                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+time.sleep(1.5)
+srv.terminate()
+saida = srv.communicate()[0]
+ok(saida.find("Counting tokens") >= 0 and saida.find("Counting tokens") < saida.find("The Kindle reads"),
+   "conta os tokens antes de abrir a porta")
 
 r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "remover"],
                    capture_output=True, text=True, env=env)

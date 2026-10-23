@@ -205,19 +205,19 @@ def session_view(s, now):
 def derive(state, now):
     """Junta todas as sessoes numa so: mostra a mais urgente e conta as ativas."""
     sessions = state.get("sessions") or {}
-    live = [s for s in sessions.values()
+    live = [(sid, s) for sid, s in sessions.items()
             if s.get("status") != "closed" and now - float(s.get("last_event") or 0) < REST_AFTER]
-    views = [(session_view(s, now), s) for s in live]
-    active = sum(1 for v, _ in views if v[0] >= 3)
+    views = [(session_view(s, now), sid, s) for sid, s in live]
+    active = sum(1 for v, _, _ in views if v[0] >= 3)
     if not views:
         last = max([float(s.get("last_event") or 0) for s in sessions.values()] or
                    [float(state.get("last_event") or 0)])
         return {"mode": "descansando", "since": last, "tool": "", "desc": "",
-                "active": 0, "project": ""}
-    (rank, mode, since, tool, desc), s = max(
-        views, key=lambda vs: (vs[0][0], float(vs[1].get("last_event") or 0)))
+                "active": 0, "project": "", "session": None}
+    (_, mode, since, tool, desc), sid, s = max(
+        views, key=lambda v: (v[0][0], float(v[2].get("last_event") or 0)))
     return {"mode": mode, "since": since, "tool": tool, "desc": desc,
-            "active": active, "project": s.get("project", "")}
+            "active": active, "project": s.get("project", ""), "session": sid}
 
 
 def demo(mode):
@@ -231,9 +231,9 @@ def demo(mode):
     s = {"status": "working", "last_event": now - 7, "tool_running": True,
          "tool_started": now - 2, "tool_name": tool, "tool_desc": tdesc, "project": "camaleao"}
     state = {"sessions": {"demo": s},
-             "tools": [{"name": a, "desc": b} for a, b in zip(tools, descs)]}
+             "tools": [{"name": a, "desc": b, "session": "demo"} for a, b in zip(tools, descs)]}
     if mode in names:
-        state["tools"][-1] = {"name": tool, "desc": tdesc}
+        state["tools"][-1] = {"name": tool, "desc": tdesc, "session": "demo"}
     elif mode in ("pensando", "frigideira"):
         s["tool_running"] = False
         s["tool_started"] = now - 120
@@ -274,6 +274,21 @@ def quando_zera(epoch, week):
     return r
 
 
+def ferramentas_antes(tools, info):
+    """As ferramentas para a lista "antes:", sem a que ja esta na barra.
+
+    A lista e de todas as sessoes; a da barra e a mais recente da sessao que
+    aparece. Com varias sessoes, ela nem sempre e a ultima da lista."""
+    if not info["tool"] or not tools:
+        return tools
+    for i in range(len(tools) - 1, -1, -1):
+        if tools[i].get("session") == info.get("session"):
+            return tools[:i] + tools[i + 1:]
+    if any("session" in t for t in tools):
+        return tools               # a ferramenta da barra ja saiu da lista
+    return tools[:-1]              # state.json antigo, sem a sessao de cada ferramenta
+
+
 def como_kindle(n):
     """Arredonda para a precisao que o Kindle mostra (E.fmt_tokens): "2,5 mi",
     "32 mil", "512". Assim o rev so muda quando o numero na tela mudaria."""
@@ -292,9 +307,8 @@ def montar_estado(now=None, demo_mode=None):
         hoje, hora, media = token_stats_cached(now)
     info = derive(state, now)
 
-    tools = state.get("tools") or []
-    past = tools[:-1] if info["tool"] and tools else tools
-    antes = [cortar(t.get("name", "?"), MAX_FERRAMENTA) for t in reversed(past[-4:])]
+    antes = [cortar(t.get("name", "?"), MAX_FERRAMENTA)
+             for t in reversed(ferramentas_antes(state.get("tools") or [], info)[-4:])]
 
     rl = status.get("rate_limits") or {}
 
@@ -303,6 +317,14 @@ def montar_estado(now=None, demo_mode=None):
         pct = d.get("used_percentage")
         if pct is None:
             return {"pct": None}
+        try:
+            zerou = float(d.get("resets_at")) <= now
+        except (TypeError, ValueError):
+            zerou = False
+        if zerou:
+            # a janela ja virou e o Claude Code nao rodou desde entao (o statusline.json
+            # so muda com ele aberto): o uso da janela nova ainda e zero
+            return {"pct": 0}
         return {"pct": int(round(float(pct))), **quando_zera(d.get("resets_at"), week)}
 
     estado = {
@@ -418,6 +440,11 @@ def rodar(cfg, demo_mode):
     except OSError as e:
         sys.exit(f"Could not open port {porta} ({e}). Is another claudinho.py already running?"
                  " Use --port to pick another one.")
+    if not demo_mode:
+        # a primeira contagem le os historicos inteiros e pode levar alguns segundos;
+        # feita aqui, ela nao atrasa a primeira resposta ao Kindle
+        log("Counting tokens in the Claude Code history…")
+        token_stats_cached(time.time())
     log(f"The Kindle reads http://{ip_local()}:{porta}/estado.json")
     if not Servidor.token:
         log("Warning: no token. Any device on the network can read the state. Run setup.py.")

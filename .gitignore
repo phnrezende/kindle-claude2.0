@@ -6,8 +6,7 @@ kindle/claudinho.koplugin/config.lua
 # ferramentas
 __pycache__/
 *.pyc
-node_modules/
-relay/.wrangler/
-tools/harness/libs/
+# o tools/harness/boot.lua cria libs/ na pasta onde voce roda
+libs/
 *.pgm
 .DS_Store
