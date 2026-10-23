@@ -151,7 +151,8 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | Painel | logo do Kindle à esquerda/direita | esquerda |
 | | animar o mascote | sim |
 | | não deixar o Kindle dormir | sim |
-| Atualizar a cada | lendo / com o painel aberto | 60 s / 30 s |
+| Atualizar a cada | lendo: adaptativo (30 s com o Claude trabalhando ou te chamando, 1 min logo depois de terminar, 3 min parado, e cada vez mais devagar sem sinal do PC, até 10 min) ou um tempo fixo (30 s, 1, 2 ou 5 min) | adaptativo |
+| | com o painel aberto | 30 s |
 | Conexão | endereço, token | do `config.lua` |
 | Idioma | automático, português (Brasil) ou inglês | automático (o do KOReader) |
 

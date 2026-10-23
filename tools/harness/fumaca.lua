@@ -367,6 +367,48 @@ pilha[#pilha]:onTap()
 chega("chamando", t0 + 1, "Bash", "make")
 confere(avisos() == base_aviso + 2, "fechou o painel: o mesmo pedido nao avisa depois")
 
+print("4b3. busca: 'Lendo' adaptativo (o padrao) ou um tempo fixo")
+local function intervalo_em(modo)
+    chega(modo, os.time() - 5, "Edit", "x.lua")
+    return p:intervalo()
+end
+confere(p:opt("intervalo_leitura") == "adaptativo", "o padrao e o adaptativo")
+confere(intervalo_em("cozinhando") == 30, "adaptativo, trabalhando: 30 s")
+confere(intervalo_em("chamando") == 30, "adaptativo, pedindo permissao: 30 s")
+confere(intervalo_em("prato") == 60, "adaptativo, acabou de terminar: 1 min")
+confere(intervalo_em("descansando") == 180, "adaptativo, parado: 3 min")
+local lendo = item(item(itens.claudinho, 5), 1)
+local opcoes = {}
+for _, it in ipairs(lendo.sub_item_table) do opcoes[#opcoes + 1] = it.text_func() end
+confere(#opcoes == 5 and opcoes[1]:find("Adaptativo", 1, true) and lendo.sub_item_table[1].radio,
+    "menu 'Lendo': adaptativo e 4 tempos fixos, uma escolha so (" .. table.concat(opcoes, " | ") .. ")")
+lendo.sub_item_table[5].callback()               -- 5 min
+confere(intervalo_em("cozinhando") == 300 and intervalo_em("descansando") == 300,
+    "fixo em 5 min: 5 min trabalhando ou parado")
+confere(not lendo.sub_item_table[1].checked_func() and lendo.sub_item_table[5].checked_func(),
+    "escolher um tempo fixo desmarca o adaptativo")
+lendo.sub_item_table[2].callback()               -- 30 s
+confere(intervalo_em("descansando") == 30, "fixo em 30 s: 30 s mesmo parado")
+lendo.sub_item_table[1].callback()               -- adaptativo de novo
+confere(intervalo_em("descansando") == 180, "de volta ao adaptativo")
+local seq_sem_sinal = {}
+for _ = 1, 6 do
+    p:falhou("teste")
+    if p:vista().grupo == "sem_sinal" then seq_sem_sinal[#seq_sem_sinal + 1] = p:intervalo() end
+end
+confere(table.concat(seq_sem_sinal, ",") == "120,240,480,600",
+    "sem sinal do PC: dobra a cada falha, ate 10 min (" .. table.concat(seq_sem_sinal, ",") .. ")")
+p:abrir_painel()
+confere(p:intervalo() == 30, "com o painel aberto: o intervalo do painel")
+pilha[#pilha]:onTap()
+-- busca de verdade (o agente em modo 'chamando'): a proxima fica para daqui a 30 s
+p:ciclo()
+rodar(3)
+local proxima
+for _, t in ipairs(tarefas) do if t.f == p.tarefa then proxima = t.t - relogio end end
+confere(proxima and proxima > 25 and proxima <= 30,
+    "depois da resposta, agenda com o estado novo (" .. tostring(proxima) .. " s)")
+
 print("4c. espaco para a linha: so a margem de cima sobe")
 leitor.rolling, leitor.view.view_mode = {}, "page"
 leitor.document.getHeaderHeight = function() return 0 end

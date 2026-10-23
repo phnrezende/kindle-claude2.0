@@ -95,7 +95,10 @@ O agente responde em todas as redes em que o computador estiver. Para responder 
 
 ### Buscas
 
-- A cada **60 s** lendo e **30 s** com o painel aberto (configurável). Na biblioteca, sem painel, não busca nada.
+- Com o painel aberto, a cada **30 s** (configurável). Na biblioteca, sem painel, não busca nada.
+- Lendo, em **Atualizar a cada → Lendo** você escolhe uma coisa só: **adaptativo** (o padrão) ou um tempo fixo (30 s, 1, 2 ou 5 min).
+- O **adaptativo** segue o que o Claude está fazendo: trabalhando ou pedindo permissão, a cada 30 s, para o aviso de permissão chegar antes; logo depois de terminar, 1 min; parado, 3 min (abaixo dos 10 min que viram "sem sinal"); sem sinal do PC, 2, 4, 8 e então 10 min, dobrando a cada falha: com o PC desligado à noite, o Kindle quase não liga o Wi-Fi.
+- Como o intervalo depende do estado novo, a próxima busca é agendada quando a resposta chega (o agendamento feito antes da busca fica de reserva, caso ela não volte).
 - A requisição roda num **subprocesso** (como o KOReader faz em outras buscas em segundo plano). O processo principal só confere a cada 0,25 s se a resposta chegou, então a virada de página nunca espera a rede.
 - Se o Wi-Fi está desligado, nem tenta (não fica travado resolvendo nome).
 - Ao dormir, para. Ao acordar, busca em 3 s. Quando o Wi-Fi conecta, busca em 1 s.
@@ -145,4 +148,4 @@ O KOReader abre fontes variáveis só no peso padrão. Por isso o plugin traz In
 
 ## Bateria
 
-Não foi medida no aparelho. O que mais gasta é o Wi-Fi ligado. Lendo com a linha do topo, são uma busca pequena por minuto e um refresh minúsculo só quando ela muda. O painel aberto, com animação, gasta bem mais: deixe no carregador.
+Não foi medida no aparelho. O que mais gasta é o Wi-Fi ligado. Lendo com a linha do topo, no adaptativo, o Kindle faz uma busca pequena a cada 30 s com o Claude trabalhando, a cada 3 min com ele parado e cada vez menos com o PC desligado. A tela só leva um refresh minúsculo quando a linha muda. O painel aberto, com animação, gasta bem mais: deixe no carregador.

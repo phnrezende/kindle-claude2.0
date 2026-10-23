@@ -40,7 +40,7 @@ local VERSAO = "1.4"
 local PADRAO = {
     overlay = true,                -- a linha "Claude ●○○ 75%" no topo da pagina
     aviso_chamando = true,         -- aviso na pagina quando o Claude pede sua permissao
-    intervalo_leitura = 60,        -- segundos entre buscas enquanto le
+    intervalo_leitura = "adaptativo", -- enquanto le: "adaptativo" (ver Claudinho:intervalo) ou segundos fixos
     intervalo_painel = 30,         -- segundos entre buscas com o painel aberto
     painel_rotacao = 90,           -- 90: logo "kindle" a esquerda; 270: a direita
     painel_animar = true,
@@ -179,8 +179,29 @@ function Claudinho:precisa_buscar()
     return self.painel ~= nil or (self.leitor and (self:opt("overlay") or self:opt("aviso_chamando")))
 end
 
+-- busca adaptativa (segundos): a base, o minimo trabalhando, e os tetos parado e sem
+-- sinal. O teto parado fica abaixo dos 10 min que viram "sem sinal" (E.SEM_SINAL_APOS).
+local BUSCA_BASE, BUSCA_MIN, BUSCA_PARADO, BUSCA_SEM_SINAL = 60, 30, 300, 600
+
+--- Segundos ate a proxima busca. Com o painel aberto, o intervalo dele. Lendo, o
+--- tempo fixo escolhido em "Lendo", ou, no adaptativo, um que segue o que o Claude
+--- esta fazendo: trabalhando ou pedindo permissao, 30 s (o aviso chega antes);
+--- terminou ha pouco, 1 min; parado, 3 min; sem sinal do PC, dobra a cada falha.
 function Claudinho:intervalo()
-    return self.painel and self:opt("intervalo_painel") or self:opt("intervalo_leitura")
+    if self.painel then return self:opt("intervalo_painel") end
+    local fixo = tonumber(self:opt("intervalo_leitura"))
+    if fixo then return fixo end
+    local base = BUSCA_BASE
+    local g = self:vista().grupo
+    if g == "trabalhando" or g == "aprovacao" then
+        return math.max(BUSCA_MIN, math.min(base, math.floor(base / 2)))
+    elseif g == "descansando" then
+        return math.max(base, math.min(BUSCA_PARADO, base * 3))
+    elseif g == "sem_sinal" then
+        local vezes = 2 ^ math.max(1, (C.falhas or 0) - 2)
+        return math.max(base, math.min(BUSCA_SEM_SINAL, base * vezes))
+    end
+    return base
 end
 
 local function conectado()
@@ -190,11 +211,18 @@ local function conectado()
     return not ok2 or r ~= false
 end
 
+--- Busca agora e agenda a proxima. O intervalo depende do estado novo, entao e
+--- recalculado quando a resposta chega; o agendado antes fica de reserva, caso ela
+--- nunca chegue.
 function Claudinho:ciclo()
     UIManager:unschedule(self.tarefa)
     if not self:precisa_buscar() then return end
-    self:buscar()
     UIManager:scheduleIn(self:intervalo(), self.tarefa)
+    self:buscar(function()
+        if not self:precisa_buscar() then return end
+        UIManager:unschedule(self.tarefa)
+        UIManager:scheduleIn(self:intervalo(), self.tarefa)
+    end)
 end
 
 --- Recomeca o ciclo agora (ou daqui a `atraso` segundos).
@@ -502,7 +530,7 @@ function Claudinho:abrir_painel()
         ao_fechar = function()
             self.painel = nil
             self:manter_acordado(false)
-            self:reiniciar(self:opt("intervalo_leitura"))
+            self:reiniciar(self:intervalo())
         end,
     })
     if not ok then
@@ -739,6 +767,10 @@ function Claudinho:addToMainMenu(menu_items)
         end
         return t
     end
+    -- "Lendo": adaptativo ou um tempo fixo (uma escolha so)
+    local lendo = intervalos("intervalo_leitura", { 30, 60, 120, 300 })
+    table.insert(lendo, 1, self:item_radio("leitura_adaptativa", "intervalo_leitura", "adaptativo",
+        function() self:reiniciar(1) end))
     local function submenu(chave, itens, extra)
         local m = { text_func = texto_de(chave), sub_item_table = itens }
         for k, v in pairs(extra or {}) do m[k] = v end
@@ -766,7 +798,7 @@ function Claudinho:addToMainMenu(menu_items)
                 self:item_liga("menu_acordado", "painel_acordado"),
             }),
             submenu("menu_atualizar", {
-                submenu("menu_lendo", intervalos("intervalo_leitura", { 30, 60, 120, 300 })),
+                submenu("menu_lendo", lendo),
                 submenu("menu_com_painel", intervalos("intervalo_painel", { 15, 30, 60 })),
             }),
             submenu("menu_conexao", {
