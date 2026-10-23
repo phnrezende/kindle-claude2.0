@@ -7,8 +7,9 @@ PC (via curl, ja que o LuaJIT puro nao tem sockets) e salva as telas:
 
     KO=... KOBASE=... luajit tools/harness/fumaca.lua URL TOKEN pasta_saida
 
-Confere: o overlay aparece no canto certo e muda de estilo, o painel abre em
-pe (girado), anima so o mascote e fecha com um toque.
+Confere: a linha do topo aparece centralizada, inverte pedindo permissao e reserva
+so o espaco dela na margem de cima; o painel abre em pe (girado), anima so o
+mascote e fecha com um toque.
 ]]
 local H = dofile((debug.getinfo(1, "S").source:sub(2):match("(.*/)") or "./") .. "boot.lua")
 local BB = H.BB
@@ -205,6 +206,11 @@ end
 print("1. plugin no leitor")
 local p = Claudinho:new{ ui = leitor }
 confere(menu_registrado == p, "registrou o menu")
+local fonte = p:arquivo_fonte("InterTight-ExtraBold.ttf")
+local arq = io.open(fonte, "rb")
+if arq then arq:close() end
+confere(arq ~= nil and fonte:match("^%.%./") ~= nil,
+    "caminho da fonte sobe ate a raiz (o getFace do KOReader 2026.07 poe ./fonts/ na frente) e abre")
 local itens = {}
 p:addToMainMenu(itens)
 confere(itens.claudinho and #itens.claudinho.sub_item_table == 7, "menu com 7 itens")
@@ -222,14 +228,18 @@ confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "volta para po
 p.settings:saveSetting("url", URL)
 p.settings:saveSetting("token", TOKEN)
 p:onReaderReady()
-confere(leitor.view.modulo ~= nil, "overlay registrado no ReaderView")
+confere(leitor.view.modulo ~= nil, "linha registrada no ReaderView")
 rodar(5)
 confere(p:vista().modo ~= "sem_sinal", "leu o estado do PC: " .. p:vista().titulo)
 local ultimo = refreshes[#refreshes]
-confere(ultimo and ultimo.w == leitor and ultimo.tipo == "ui", "pediu refresh 'ui' so do cantinho")
+confere(ultimo and ultimo.w == leitor and ultimo.tipo == "ui" and ultimo.regiao and ultimo.regiao.h == 20,
+    "pediu refresh 'ui' so da faixa da linha")
 pagina()
-local r = p:overlay_retangulo()
-confere(r.x + r.w == TELA_W - 8 and r.y == 8, "overlay no canto superior direito com margem")
+local info = p:linha_alvo()
+local r = p:linha_retangulo(p.linha_img:getWidth())
+confere(math.abs(r.x + r.w / 2 - TELA_W / 2) <= 1 and r.y == 4 and r.h == 20, "linha centralizada no topo")
+confere(info.estado == 3 and info.alerta, "demo 'chamando': terceira bolinha, em alerta")
+confere(tela:getPixel(r.x + 2, r.y + r.h / 2):getColor8().a < 0x40, "pedindo permissao: pilula preta")
 H.salvar_pgm(tela, SAIDA .. "/leitura.pgm")
 
 print("1b. testar a conexao com outra busca em andamento")
@@ -243,15 +253,22 @@ confere(avisado, "avisa quando ela termina")
 print("2. sem mudanca: nao repinta")
 local n = #refreshes
 rodar(61)
-confere(#refreshes == n, "nenhum refresh quando o overlay nao muda")
+confere(#refreshes == n, "nenhum refresh quando a linha nao muda")
 
-print("3. canto inferior esquerdo respeita a barra de status")
-p:mudar("overlay_canto", "inferior_esquerdo")
-local r2 = p:overlay_retangulo()
-confere(r2.x == 8 and r2.y + r2.h == TELA_H - 8 - 30, "acima do rodape do KOReader")
+print("3. desligar e ligar a linha")
+p:mudar("overlay", false)
+local ult = refreshes[#refreshes].regiao
+confere(ult and ult.x == 0 and ult.w == TELA_W and ult.y == 4, "desligada: refresca a faixa toda do topo")
 pagina()
-H.salvar_pgm(tela, SAIDA .. "/leitura_inferior.pgm")
-p:mudar("overlay_canto", "superior_direito")
+local limpo = true
+for x = 0, TELA_W - 1, 2 do
+    if tela:getPixel(x, 14):getColor8().a < 0xF0 then limpo = false end
+end
+confere(limpo, "desligada: nada desenhado no topo")
+p:mudar("overlay", true)
+pagina()
+confere(p.linha_pintada ~= nil, "ligada de novo: volta")
+n = #refreshes
 
 print("4. painel")
 p:abrir_painel()
@@ -282,54 +299,68 @@ confere(completos == 1, "10 minutos sem estado novo: 1 refresh completo (" .. co
 painel:onTap()
 confere(pilha[#pilha] == leitor and p.painel == nil, "um toque fecha e volta para o livro")
 
-print("4c. na barra de status")
-local footer = leitor.view.footer
-p:mudar("overlay_onde", "barra")
-confere(#footer.conteudo == 1, "o texto do Claudinho entrou na barra de status")
-confere(footer.conteudo[1]() == "Claude: TE CHAMANDO!", "texto da barra: " .. tostring(footer.conteudo[1]()))
-confere(p:overlay_alvo() == false, "e o Claudinho some do canto")
-local pediu = false
-for _, ev in ipairs(eventos) do if ev.name == "RefreshAdditionalContent" then pediu = true end end
-confere(pediu, "pede para o rodape redesenhar")
-p:mudar("overlay_onde", "canto")
-confere(#footer.conteudo == 0 and p:overlay_alvo() == true, "de volta ao canto, sai da barra")
-
-print("4d. aviso quando o Claudinho cobre o texto")
+print("4c. espaco para a linha: so a margem de cima sobe")
 leitor.rolling, leitor.view.view_mode = {}, "page"
 leitor.document.getHeaderHeight = function() return 0 end
-leitor.typeset = { unscaled_margins = { 10, 15, 10, 15 } }     -- as margens padrao do KOReader
-local qual, valor = p:margem_necessaria()
-confere(qual == "cima" and valor == 66, "margem de cima 15: cobre; pede 66 (" .. tostring(valor) .. ")")
-local n_msg = #mensagens
-p:avisar_margem()
-confere(#mensagens == n_msg + 1 and mensagens[#mensagens]:find("66") ~= nil, "avisa, com a margem que resolve")
-p:avisar_margem()
-confere(#mensagens == n_msg + 1, "e nao repete o mesmo aviso")
-leitor.typeset.unscaled_margins = { 10, 70, 10, 15 }
-confere(p:margem_necessaria() == nil, "margem de cima 70: nao cobre")
-p:mudar("overlay_canto", "inferior_esquerdo")
-local qual2, valor2 = p:margem_necessaria()
-confere(qual2 == "baixo" and valor2 == 66, "embaixo, margem de baixo 15: cobre (" .. tostring(valor2) .. ")")
-p:mudar("overlay_canto", "superior_direito")
-p:mudar("overlay_onde", "barra")
-confere(p:margem_necessaria() == nil, "na barra de status nunca cobre")
-p:mudar("overlay_onde", "canto")
-leitor.rolling, leitor.typeset = nil, nil
+local suas = { h_page_margins = { 10, 10 }, t_page_margin = 15, b_page_margin = 15 }   -- o que o livro grava
+leitor.document.configurable = suas
+leitor.typeset = { unscaled_margins = { 10, 15, 10, 15 } }
+local aplicadas = 0
+leitor.handleEvent = function(_, ev)
+    if ev.name ~= "SetPageMargins" then return end
+    aplicadas = aplicadas + 1
+    p:onSetPageMargins(ev.args[1])      -- como no KOReader, o evento chega tambem ao plugin
+end
+local function margens() return table.concat(leitor.typeset.unscaled_margins, ",") end
+-- voce muda a margem de cima no menu de baixo: o KOReader grava e aplica
+local function voce_poe(t)
+    suas.t_page_margin = t
+    leitor.typeset.unscaled_margins = { 10, t, 10, suas.b_page_margin }
+    leitor:handleEvent({ name = "SetPageMargins", args = { leitor.typeset.unscaled_margins } })
+    rodar(0)
+end
+local pede = p:margem_necessaria({ 10, 15, 10, 15 })
+confere(pede == 28, "margem de cima 15 (a padrao): a linha pede 28 (" .. tostring(pede) .. ")")
+confere(p:margem_necessaria({ 10, 40, 10, 15 }) == nil, "margem de cima 40: ja cabe")
+p:onPreRenderDocument()
+confere(margens() == "10,28,10,15", "antes de paginar: so a de cima sobe, para 28 (" .. margens() .. ")")
+confere(suas.t_page_margin == 15, "a margem gravada no livro continua a sua")
+rodar(0)
+confere(p:margem_necessaria() == nil, "a linha nao cobre mais o texto")
+confere(aplicadas == 1, "sem laco: o evento que volta nao muda nada (" .. aplicadas .. ")")
+voce_poe(20)
+confere(margens() == "10,28,10,15" and suas.t_page_margin == 20, "voce poe 20: a pagina fica com 28, o livro guarda 20")
+voce_poe(80)
+confere(margens() == "10,80,10,15", "voce poe 80 (mais que o preciso): fica 80")
+voce_poe(15)
+p:mudar("overlay", false)
+confere(margens() == "10,15,10,15", "linha desligada: a sua margem volta")
+p:mudar("overlay", true)
+confere(margens() == "10,28,10,15", "ligada de novo: reserva de novo")
+leitor.document.getHeaderHeight = function() return 25 end      -- cabecalho do livro ligado
+confere(p:linha_retangulo().y == 29 and p:margem_necessaria({ 10, 15, 10, 15 }) == 28,
+    "com o cabecalho do livro, a linha vai abaixo dele e pede a mesma margem")
+leitor.document.getHeaderHeight = function() return 0 end
+leitor.rolling = nil                    -- PDF: pagina fixa
+local ok_pdf = pcall(function() p:mudar("overlay", false); rodar(0); p:mudar("overlay", true); rodar(0) end)
+confere(ok_pdf and margens() == "10,28,10,15", "PDF: nao mexe em nada, sem erro")
+leitor.rolling, leitor.typeset, leitor.document.configurable, leitor.handleEvent = nil, nil, nil, nil
+leitor.view.view_mode, leitor.document.getHeaderHeight = nil, nil
 
 print("5. PC some")
 p.settings:saveSetting("url", "http://127.0.0.1:1/estado.json")
 for _ = 1, 3 do p:buscar(); rodar(2) end
 confere(p:vista().modo == "sem_sinal", "depois de 3 falhas mostra 'sem sinal'")
-local _, quadro, estilo = p:overlay_alvo()
-confere(estilo == "apagado", "overlay fica apagado (" .. tostring(quadro) .. ")")
-p:mudar("overlay_so_ativo", true)
-confere(p:overlay_alvo() == false, "com 'esconder quando parado', some")
+local info5 = p:linha_alvo()
+confere(info5.estado == nil and info5.pct == "--", "linha: nenhuma bolinha cheia e '--'")
+pagina()
+H.salvar_pgm(tela, SAIDA .. "/leitura_sem_sinal.pgm")
 
 print("6. um erro no plugin nao quebra a pagina")
 local E = require("claudinho/estado")
 local original = E.interpretar
 E.interpretar = function() error("erro de teste") end
-p:mudar("overlay_so_ativo", false)
+p:atualizar_linha(true)
 local ok_pagina = pcall(pagina)
 local ok_busca = pcall(function() p:buscar(); rodar(2) end)
 local ok_painel = pcall(function() p:abrir_painel(); rodar(2); pilha[#pilha]:onTap() end)
@@ -337,9 +368,9 @@ E.interpretar = original
 confere(ok_painel and p.painel == nil, "o painel abre (com o minimo) e fecha")
 confere(ok_pagina, "o livro continua sendo desenhado")
 confere(ok_busca, "a busca e a atualizacao seguem sem erro")
-p.overlay_pintado = nil
+p.linha_pintada = nil
 pagina()
-confere(p.overlay_pintado ~= nil, "com o erro corrigido, o overlay volta")
+confere(p.linha_pintada ~= nil, "com o erro corrigido, a linha volta")
 
 print("7. Kindle: o protetor de tela volta mesmo se o KOReader fechar com o painel aberto")
 local executar = os.execute

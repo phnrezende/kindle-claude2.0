@@ -1,6 +1,6 @@
 # Testar no computador (emulador do KOReader)
 
-O KOReader tem uma versão para Linux que roda numa janela. O plugin é o mesmo do Kindle, então dá para testar tudo antes de copiar para o aparelho: o overlay na leitura, o painel, o toque para voltar e a conexão com o agente.
+O KOReader tem uma versão para Linux que roda numa janela. O plugin é o mesmo do Kindle, então dá para testar tudo antes de copiar para o aparelho: a linha do topo na leitura, o painel, o toque para voltar e a conexão com o agente.
 
 Funciona numa máquina virtual Linux (Ubuntu, Debian, Fedora…) ou num Linux de verdade. No macOS também existe KOReader, mas este guia usa Linux.
 
@@ -57,13 +57,13 @@ EMULATE_READER_W=600 EMULATE_READER_H=800 EMULATE_READER_FLASH=1 ./koreader-*.Ap
 |---|---|---|
 | Menu | clique no topo da tela → aba Ferramentas | item **Claudinho (Claude Code)** |
 | Conexão | Claudinho → Conexão → Testar a conexão agora | "Conectado. Claude: Te chamando!" |
-| Overlay | abra um livro (qualquer EPUB ou PDF) | Claudinho no canto superior direito; preto no demo `chamando` |
-| Só o canto atualiza | troque a demo e espere até 1 min (ou use "Testar a conexão") | com o `EMULATE_READER_FLASH`, só o cantinho pisca |
-| Virar a página | vire algumas páginas | o Claudinho continua lá, sem piscar a mais |
+| Linha do topo | abra um livro (qualquer EPUB) | "Claude ○○● 11%" centralizada no topo, em branco numa pílula preta no demo `chamando`; o texto começa logo abaixo dela |
+| Só a linha atualiza | troque a demo e espere até 1 min (ou use "Testar a conexão") | com o `EMULATE_READER_FLASH`, só a faixa do topo pisca |
+| Virar a página | vire algumas páginas | a linha continua lá, sem piscar a mais |
 | Painel | Claudinho → Abrir o painel | o painel em pé (girado), com o mascote animando |
 | Voltar | clique em qualquer lugar do painel | volta para o livro |
-| Sem sinal | pare o agente e espere 3 buscas | overlay cinza, painel "Sem sinal do PC" |
-| Canto e tamanho | Overlay na leitura → Canto / Tamanho | o Claudinho muda de lugar sem cobrir a barra de status |
+| Sem sinal | pare o agente e espere 3 buscas | linha cinza, sem bolinha cheia e com "--"; painel "Sem sinal do PC" |
+| Desligar a linha | Claudinho → Mostrar o status no topo da página | a linha some e o texto sobe para a sua margem; ligando de novo, desce |
 
 Livros para testar: qualquer EPUB de domínio público, por exemplo do [Projeto Gutenberg](https://www.gutenberg.org/).
 
@@ -71,7 +71,7 @@ Dica: para não esperar 60 s entre buscas, use **Claudinho → Atualizar a cada 
 
 ## 6. Com o Claude Code de verdade
 
-Rode o setup completo (`python3 pc/setup.py`), reinicie o Claude Code e use normalmente. O overlay e o painel passam a seguir as suas sessões.
+Rode o setup completo (`python3 pc/setup.py`), reinicie o Claude Code e use normalmente. A linha do topo e o painel passam a seguir as suas sessões.
 
 ## Onde ver erros
 

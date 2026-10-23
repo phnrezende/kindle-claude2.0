@@ -1,5 +1,5 @@
 --[[--
-Desenho do painel e do overlay em Blitbuffer (o motor grafico do KOReader).
+Desenho do painel e da linha do topo em Blitbuffer (o motor grafico do KOReader).
 
 O painel e desenhado deitado, em 800x600 "unidades de design" vezes uma escala
 `k`, com as mesmas posicoes, fontes e espacamentos do render() do kindle-claude
@@ -324,30 +324,103 @@ function D:relogio(bb, hora)
     self:texto(bb, 30, 486, hora, "inter900", 92, self.cor.branco, 84, -4.6)
 end
 
--- ------------------------------------------------------------------ overlay
+-- ------------------------------------------------------------------ linha do topo
 
-D.ESTILOS = {
-    normal = { fundo = 0xFF, borda = 0x00, traco = 0x00, cinza = 0x88 },
-    alerta = { fundo = 0x00, borda = 0x00, traco = 0xFF, cinza = 0xAA },   -- pedindo aprovacao
-    apagado = { fundo = 0xFF, borda = 0xAA, traco = 0xAA, cinza = 0xD0 }, -- sem sinal do PC
+-- medidas da linha "Claude ●○○ 75%" em pixels do Kindle de 600x800 (escala 1)
+D.LINHA = {
+    altura = 20,     -- da pilula (o fundo preto do "pedindo permissao")
+    fonte = 14,
+    pad = 9,         -- da pilula ate o texto, dos lados
+    vao = 7,         -- entre "Claude", as bolinhas e o %
+    bolinha = 9,     -- diametro
+    entre = 4,       -- entre as bolinhas
+    traco = 1.4,     -- espessura da bolinha vazia
 }
 
---- Tamanho da caixa do overlay em pixels para uma celula de `cel` px.
-function D.tamanho_overlay(sprites, cel)
-    local pad = cel * 2
-    return sprites.largura * cel + 2 * pad, sprites.altura * cel + 2 * pad
+local AMOSTRAS = 4   -- por eixo, por pixel: as bordas redondas saem suaves
+
+--- Pinta um circulo cheio, ou so o contorno de `espessura`, com centro e raio em
+--- pixels reais. `cor_v` e `fundo_v` sao tons de 0 a 255 (o fundo precisa ser liso).
+function D:circulo(bb, cx, cy, raio, cheio, espessura, cor_v, fundo_v)
+    local dentro = raio - espessura
+    for py = floor(cy - raio - 1), floor(cy + raio + 1) do
+        for px = floor(cx - raio - 1), floor(cx + raio + 1) do
+            local hits = 0
+            for sy = 0, AMOSTRAS - 1 do
+                local dy = py + (sy + 0.5) / AMOSTRAS - cy
+                for sx = 0, AMOSTRAS - 1 do
+                    local dx = px + (sx + 0.5) / AMOSTRAS - cx
+                    local d = sqrt(dx * dx + dy * dy)
+                    if d <= raio and (cheio or d >= dentro) then hits = hits + 1 end
+                end
+            end
+            if hits > 0 then
+                bb:setPixel(px, py, self.BB.Color8(misturar(fundo_v, cor_v, hits / (AMOSTRAS * AMOSTRAS))))
+            end
+        end
+    end
 end
 
---- Caixinha do mascote para o canto da pagina. Desenha direto na tela.
-function D:overlay(bb, x, y, nome, cel, estilo)
-    local e = D.ESTILOS[estilo] or D.ESTILOS.normal
-    local C8 = self.BB.Color8
-    local w, h = D.tamanho_overlay(self.sprites, cel)
-    local borda = math.max(1, floor(cel / 1.5))
-    bb:paintRect(x, y, w, h, C8(e.fundo))
-    bb:paintBorder(x, y, w, h, borda, C8(e.borda), 0)
-    local pad = cel * 2
-    self:sprite(bb, x + pad, y + pad, nome, cel, { traco = C8(e.traco), cinza = C8(e.cinza) })
+--- Pinta uma pilula (retangulo com as pontas em meio circulo) do tamanho de `bb`.
+function D:pilula(bb, cor_v, fundo_v)
+    local w, h = bb:getWidth(), bb:getHeight()
+    local r = h / 2
+    local ponta = math.ceil(r)
+    bb:paintRect(ponta, 0, w - 2 * ponta, h, self.BB.Color8(cor_v))
+    for _, lado in ipairs({ { 0, r }, { w - ponta, w - r } }) do
+        local x0, cx = lado[1], lado[2]
+        for py = 0, h - 1 do
+            for px = x0, x0 + ponta - 1 do
+                local hits = 0
+                for sy = 0, AMOSTRAS - 1 do
+                    local dy = py + (sy + 0.5) / AMOSTRAS - r
+                    for sx = 0, AMOSTRAS - 1 do
+                        local dx = px + (sx + 0.5) / AMOSTRAS - cx
+                        if dx * dx + dy * dy <= r * r then hits = hits + 1 end
+                    end
+                end
+                bb:setPixel(px, py, self.BB.Color8(misturar(fundo_v, cor_v, hits / (AMOSTRAS * AMOSTRAS))))
+            end
+        end
+    end
+end
+
+--[[--
+Imagem da linha do topo da pagina: "Claude" (ou "Claude ×3"), as tres bolinhas
+(parado, trabalhando, pedindo permissao) e o % da sessao de 5 h. Pedindo permissao,
+fica branca numa pilula preta; sem sinal do PC, cinza e sem bolinha cheia.
+@param info o que estado.linha_topo() devolveu
+@param s escala: pixels reais por pixel do Kindle de 600x800
+@return Blitbuffer novo (quem chama libera)
+]]
+function D:linha_topo(info, s)
+    local Lh, BB, RT = D.LINHA, self.BB, self.RT
+    local face = self.fonte("inter800", Lh.fonte * s)
+    local nome = (info.agentes or 0) > 1 and ("Claude ×" .. info.agentes) or "Claude"
+    local w_nome = RT:sizeUtf8Text(0, nil, face, nome, true, false).x
+    local w_pct = RT:sizeUtf8Text(0, nil, face, info.pct, true, false).x
+    local d, entre, pad, vao = Lh.bolinha * s, Lh.entre * s, Lh.pad * s, Lh.vao * s
+    local w_bolinhas = 3 * d + 2 * entre
+    local W = arred(2 * pad + w_nome + vao + w_bolinhas + vao + w_pct)
+    local H = arred(Lh.altura * s)
+
+    local fundo = info.alerta and CORES.preto or CORES.branco
+    local frente = info.alerta and CORES.branco or (info.estado and CORES.preto or CORES.c888)
+    local img = BB.new(W, H, BB.TYPE_BB8)
+    img:fill(self.cor.branco)
+    if info.alerta then self:pilula(img, CORES.preto, CORES.branco) end
+
+    local asc, desc = metricas(face)
+    local base = arred((H - (asc + desc)) / 2 + asc)
+    local cor = BB.Color8(frente)
+    RT:renderUtf8Text(img, arred(pad), base, face, nome, true, false, cor)
+    local x = pad + w_nome + vao
+    for i = 1, 3 do
+        self:circulo(img, x + d / 2 + (i - 1) * (d + entre), H / 2, d / 2, info.estado == i, Lh.traco * s,
+            frente, fundo)
+    end
+    RT:renderUtf8Text(img, arred(x + w_bolinhas + vao), base, face, info.pct, true, false, cor)
+    return img
 end
 
 return D

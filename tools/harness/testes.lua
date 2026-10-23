@@ -42,7 +42,7 @@ local info = { recebido_em = agora, desvio = E.desvio(d, agora), falhas = 0 }
 local v = E.interpretar(d, agora, info)
 igual(v.titulo, "Te chamando!", "titulo")
 igual(v.linha, "esperando você há 40s", "linha")
-igual(v.grupo, "aprovacao", "grupo do overlay")
+igual(v.grupo, "aprovacao", "grupo (o que a linha do topo distingue)")
 igual(v.antes, "Edit · Read", "antes")
 igual(v.sessao.txt, "11%", "sessao")
 igual(v.sessao.zera, "zera às 15:00", "quando zera a sessao")
@@ -129,17 +129,31 @@ igual(E.interpretar(d4, agora + 3600, { recebido_em = agora, dormiu = 0 }).modo,
 igual(E.interpretar(d4, agora + 3600, { recebido_em = agora, dormiu = 3590, falhas = 3 }).modo, "sem_sinal",
     "3 falhas depois de acordar: sem sinal")
 
-print("barra de status")
-igual(E.texto_barra({ grupo = "aprovacao" }), "Claude: TE CHAMANDO!", "pedindo aprovacao")
-igual(E.texto_barra({ grupo = "trabalhando" }), "Claude: cozinhando", "trabalhando")
-igual(E.texto_barra({ grupo = "descansando" }, true), nil, "parado, com 'esconder quando parado': nada")
-igual(E.texto_barra({ grupo = "sem_sinal" }, false), "Claude: sem sinal", "sem sinal")
-igual(E.texto_barra({ grupo = "xyz" }), "Claude: sem sinal", "grupo estranho nao quebra")
-L.escolher("en")
-igual(E.texto_barra({ grupo = "aprovacao" }), "Claude: CALLING YOU!", "em ingles")
-L.escolher("pt")
+print("linha do topo")
+local function linha(t) return E.linha_topo(E.interpretar(com(t), agora, { recebido_em = agora })) end
+local lt = linha{ modo = "descansando", sessao = { pct = 75 } }
+igual(lt.estado, 1, "parado: primeira bolinha")
+igual(lt.pct, "75%", "o % da sessao de 5 h")
+igual(lt.alerta, false, "parado: sem alerta")
+igual(linha{ modo = "prato" }.estado, 1, "prato pronto: primeira bolinha")
+igual(linha{ modo = "esperando" }.estado, 1, "terminou ha um tempo: primeira bolinha")
+igual(linha{ modo = "cozinhando" }.estado, 2, "trabalhando: segunda")
+lt = linha{ modo = "chamando", sessao = { pct = 40 } }
+igual(lt.estado, 3, "pedindo permissao: terceira")
+igual(lt.alerta, true, "pedindo permissao: inverte a linha")
+igual(linha{ modo = "cozinhando" }.pct, "0%", "sem o % (plano sem limite ou janela nova): 0%")
+igual(linha{ modo = "cozinhando", sessao = { pct = 74.6 } }.pct, "75%", "arredonda")
+igual(linha{ modo = "cozinhando", sessao = { pct = 130 } }.pct, "100%", "passou do limite: 100%")
+igual(linha{ modo = "cozinhando", sessao = { pct = -3 } }.pct, "0%", "negativo: 0%")
+igual(linha{ modo = "cozinhando", ativos = 3 }.agentes, 3, "3 agentes trabalhando")
+local ls = E.linha_topo(E.interpretar(nil, agora, {}))
+igual(ls.estado, nil, "sem sinal: nenhuma bolinha cheia")
+igual(ls.pct, "--", "sem sinal: -- (o Kindle nao sabe)")
+igual(E.linha_topo(E.interpretar(com{ modo = "cozinhando", ativos = 3, sessao = { pct = 50 } }, agora + 3600,
+    { recebido_em = agora })).agentes, 0, "sem sinal: nao conta agentes")
+igual(E.linha_topo(nil).pct, "--", "vista estranha nao quebra")
 
-print("dados estranhos nunca dao erro (o overlay roda a cada pagina)")
+print("dados estranhos nunca dao erro (a linha do topo roda a cada pagina)")
 local estranhos = { {}, { 1 }, true, 5, "x", -1, 1e300 }
 local campos = { "modo", "desde", "ferramenta", "descricao", "ativos", "projeto", "antes", "sessao", "semana",
     "tokens", "rev", "agora" }
@@ -148,11 +162,11 @@ for _, c in ipairs(campos) do
     for _, valor in ipairs(estranhos) do
         local dd = { modo = "cozinhando", ativos = 2, ferramenta = "Edit", projeto = "p" }
         dd[c] = valor
-        local ok, err = pcall(E.interpretar, dd, agora, { recebido_em = agora })
+        local ok, err = pcall(function() return E.linha_topo(E.interpretar(dd, agora, { recebido_em = agora })) end)
         if not ok then falhou_estranho = c .. ": " .. tostring(err) end
     end
 end
-igual(falhou_estranho, nil, "nenhum campo estranho quebra o interpretar")
+igual(falhou_estranho, nil, "nenhum campo estranho quebra o interpretar nem a linha")
 local vt = E.interpretar({ modo = "cozinhando", ativos = 2, ferramenta = "Edit", projeto = {}, descricao = true,
     antes = { "Read", {}, 3 } }, agora, { recebido_em = agora })
 igual(vt.descricao, "", "descricao que nao e texto vira vazia")

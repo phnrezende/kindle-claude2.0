@@ -1,5 +1,5 @@
 --[[--
-Transforma o JSON que vem do PC no que o painel e o overlay mostram.
+Transforma o JSON que vem do PC no que o painel e a linha do topo mostram.
 
 Nao depende do KOReader (da para testar com LuaJIT puro). Os textos e as
 regras de animacao vieram do server.py do kindle-claude (guithepc, MIT).
@@ -26,7 +26,7 @@ local ANIMACAO = {
     chamando = "esperando", descansando = "descansando", sem_sinal = "descansando",
 }
 
---- Grupo usado pelo overlay da leitura (so tres estados importam ali).
+--- Grupo de cada modo (a linha do topo da pagina so distingue estes).
 E.GRUPO = {
     cozinhando = "trabalhando", chamando = "aprovacao", esperando = "pronto",
     prato = "pronto", descansando = "descansando", sem_sinal = "sem_sinal",
@@ -54,7 +54,7 @@ function E.fmt_ha(segundos)
     return h .. " h " .. m .. " min"
 end
 
---- Primeiro quadro da animacao do modo (o que fica parado no overlay).
+--- Primeiro quadro da animacao do modo (um painel parado, nas imagens).
 function E.quadro_parado(modo)
     return (ANIMACAO[modo] or "descansando") .. "_1"
 end
@@ -186,6 +186,7 @@ function E.interpretar(dados, agora, info)
         titulo = titulo,
         linha = linha,
         agentes = agentes,
+        ativos = sem_sinal and 0 or ativos,
         ferramenta = ferramenta,
         descricao = descricao,
         antes = #antes > 0 and table.concat(antes, " · ") or L.t("nada_ainda"),
@@ -199,14 +200,32 @@ function E.interpretar(dados, agora, info)
     }
 end
 
-local GRUPOS = { trabalhando = true, aprovacao = true, pronto = true, descansando = true, sem_sinal = true }
+--- Qual das tres bolinhas da linha do topo fica cheia: 1 parado (e tambem
+--- "terminou", que espera o seu proximo pedido), 2 trabalhando, 3 pedindo permissao.
+E.BOLINHA = { descansando = 1, pronto = 1, trabalhando = 2, aprovacao = 3 }
 
---- Texto curto para a barra de status do KOReader (modo "na barra de status"),
---- ou nil para nao mostrar nada. `so_ativo`: esconde quando o Claude esta parado.
-function E.texto_barra(v, so_ativo)
-    local g = type(v) == "table" and GRUPOS[v.grupo] and v.grupo or "sem_sinal"
-    if so_ativo and (g == "descansando" or g == "sem_sinal") then return nil end
-    return L.t("barra_" .. g)
+--[[--
+O que a linha do topo da pagina mostra ("Claude ●○○ 75%"), a partir de E.interpretar().
+
+  estado: 1, 2 ou 3 (a bolinha cheia), ou nil sem sinal do PC (nenhuma cheia)
+  pct: o % usado da sessao de 5 h, "--" sem sinal
+  agentes: quantos estao trabalhando ou pedindo permissao ("Claude ×3" se mais de 1)
+  alerta: pedindo permissao (a linha inverte, para chamar a atencao de longe)
+
+Sem o % (plano sem limite de uso, ou a janela de 5 h ainda sem nenhuma resposta),
+mostra 0%: nada foi gasto de um limite que nao existe ou que acabou de comecar. Uma
+janela que ja zerou o agente do PC tambem manda 0. So "sem sinal" mostra "--": ai o
+Kindle nao sabe, e um 0% pareceria um numero de verdade.
+]]
+function E.linha_topo(v)
+    v = type(v) == "table" and v or {}
+    local estado = E.BOLINHA[v.grupo]
+    if not estado then return { estado = nil, pct = "--", agentes = 0, alerta = false } end
+    local pct = type(v.sessao) == "table" and tonumber(v.sessao.pct) or 0
+    if pct ~= pct then pct = 0 end                          -- NaN
+    pct = math.max(0, math.min(100, pct))
+    local agentes = math.floor(math.max(0, math.min(99, tonumber(v.ativos) or 0)))
+    return { estado = estado, pct = string.format("%.0f%%", pct), agentes = agentes, alerta = estado == 3 }
 end
 
 --- "qui 22/10" (ou "Thu Oct 22") e "13:12" com o relogio do Kindle.

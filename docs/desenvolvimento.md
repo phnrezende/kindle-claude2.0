@@ -14,20 +14,21 @@ python3 tools/testes_pc.py
 
 export KO=~/src/koreader KOBASE=~/src/koreader-base
 
-# logica pura: formatos, estado, relogios, json, empacotamento
+# logica pura: formatos, estado, linha do topo, relogios, json, empacotamento
 luajit tools/harness/testes.lua
 
 # o plugin inteiro com um KOReader simulado, contra o agente rodando
 python3 pc/claudinho.py --demo chamando &
 luajit tools/harness/fumaca.lua http://127.0.0.1:8787/estado.json SEU_TOKEN /tmp
 
-# imagens do painel e do overlay (PGM; converta com qualquer programa de imagem)
+# imagens do painel e da linha do topo (PGM; converta com qualquer programa de imagem)
 luajit tools/harness/render.lua estado.json painel.pgm 1 13:12 "qui 22/10"   # [pt|en] no fim
+luajit tools/harness/render.lua --linha estado.json linha.pgm 2               # a linha, em escala 2
 luajit tools/harness/imagens.lua /tmp        # em portugues
 luajit tools/harness/imagens.lua /tmp en     # em ingles
 ```
 
-O `fumaca.lua` confere: menu registrado, overlay no ReaderView, leitura em subprocesso, refresh só do cantinho, overlay acima da barra de status, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, o modo "na barra de status", o aviso de margem, "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
+O `fumaca.lua` confere: menu registrado, linha do topo no ReaderView (centralizada, pílula preta pedindo permissão), leitura em subprocesso, refresh só da faixa da linha, desligar e ligar a linha, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, a margem de cima reservada (sem mexer na que o livro grava, abaixo do cabeçalho do livro, e de volta ao desligar), "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
 
 O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
 
@@ -44,6 +45,6 @@ Os sprites seguem a regra do original: grade 36×24, `#` traço, `+` cinza, `.` 
 ## Detalhes do KOReader que importam
 
 - **Nomes de módulos:** o KOReader junta as pastas de todos os plugins no caminho de busca do Lua. Por isso os módulos ficam em `claudinho/…` (`require("claudinho/estado")`), para não colidir com módulos do KOReader como `json`.
-- **Fontes:** o `Font:getFace` só aceita caminho de arquivo começando com `/` ou `./`, e escala o tamanho pela tela. O plugin compensa a escala para desenhar no pixel exato do design.
+- **Fontes:** até o KOReader 2026.07, o `Font:getFace` põe a pasta de fontes na frente de qualquer nome, até de um caminho absoluto (`./fonts//mnt/us/…`), e a fonte não abre: o plugin caía na fonte padrão. Por isso ele passa um caminho que sobe até a raiz a partir da pasta de fontes (`../../…/mnt/us/koreader/plugins/…`), que funciona nas versões antigas e nas novas (`arquivo_fonte`, em `main.lua`). O `getFace` também escala o tamanho pela tela; o plugin compensa para desenhar no pixel exato do design. O `fumaca.lua` simula o `getFace` e não pega esse tipo de problema: confira no emulador (o log mostra `Font … not supported`).
 - **Textos:** tudo o que aparece no Kindle (painel, menu, avisos, erros) está em `claudinho/textos.lua`, em português e inglês. O `testes.lua` confere que os dois idiomas têm as mesmas chaves. Mudou um texto? Gere as imagens nos dois idiomas com o `imagens.lua` para ver se cabe: o título tem 240 de largura, a linha de baixo 240 e o "zera às" 220 (unidades de design, em 800×600).
 - **Instâncias:** o KOReader cria uma instância nova do plugin ao trocar entre a biblioteca e um livro. O último estado fica num módulo compartilhado, então nada some na troca.

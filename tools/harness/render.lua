@@ -1,8 +1,8 @@
 --[[--
-Renderiza o painel e o overlay do plugin para imagens, fora do Kindle.
+Renderiza o painel e a linha do topo do plugin para imagens, fora do Kindle.
 
     luajit tools/harness/render.lua estado.json saida.pgm [escala] [hora] [data] [pt|en]
-    luajit tools/harness/render.lua --overlay saida.pgm [celula]
+    luajit tools/harness/render.lua --linha estado.json saida.pgm [escala]
 
 Usado para conferir o desenho contra o original e gerar as imagens do README.
 ]]
@@ -14,26 +14,21 @@ local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
 local args = { ... }
+local linha = args[1] == "--linha"
+if linha then table.remove(args, 1) end
 L.escolher(args[6] or "pt")
-
-if args[1] == "--overlay" then
-    local cel = tonumber(args[3]) or 2
-    local d = D.novo(H.BB, H.RT, H.fonte, sprites, 1)
-    local w, h = D.tamanho_overlay(sprites, cel)
-    local casos = { { "sopa_1", "normal" }, { "esperando_1", "alerta" }, { "esperando_1", "normal" },
-        { "prato_1", "normal" }, { "descansando_1", "normal" }, { "descansando_1", "apagado" } }
-    local bb = H.BB.new((w + 12) * #casos + 12, h + 24, H.BB.TYPE_BB8)
-    bb:fill(H.BB.Color8(0xF4))
-    for i, c in ipairs(casos) do
-        d:overlay(bb, 12 + (i - 1) * (w + 12), 12, c[1], cel, c[2])
-    end
-    H.salvar_pgm(bb, args[2])
-    return
-end
 
 local f = assert(io.open(args[1]))
 local dados = assert(json.decode(f:read("*a")))
 f:close()
+
+if linha then
+    local agora = tonumber(dados.agora) or os.time()
+    local v = E.interpretar(dados, agora, { recebido_em = agora, desvio = E.desvio(dados, agora) })
+    local img = D.novo(H.BB, H.RT, H.fonte, sprites, 1):linha_topo(E.linha_topo(v), tonumber(args[3]) or 1)
+    H.salvar_pgm(img, args[2])
+    return
+end
 local k = tonumber(args[3]) or 1
 local agora = tonumber(dados.agora) or os.time()
 local v = E.interpretar(dados, agora, { recebido_em = agora, desvio = E.desvio(dados, agora) })

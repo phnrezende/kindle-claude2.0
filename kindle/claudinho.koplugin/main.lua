@@ -2,9 +2,9 @@
 Claudinho: o Claude Code no Kindle, dentro do KOReader.
 
 - Painel em tela cheia (o do kindle-claude), com toque para voltar aos livros.
-- Overlay: um Claudinho pequeno num canto da pagina enquanto voce le, mostrando
-  se o Claude esta trabalhando, esperando sua aprovacao ou descansando. Ou, se
-  preferir, uma palavra na barra de status do KOReader, que nunca cobre o texto.
+- Linha no topo da pagina enquanto voce le ("Claude ●○○ 75%"): se o Claude esta
+  parado, trabalhando ou pedindo permissao, e o % usado da sessao de 5 h. A margem
+  de cima sobe so o bastante para ela nao cobrir o texto.
 - Le o estado do agente no PC, na mesma rede Wi-Fi: uma URL que devolve um JSON.
 
 @module koplugin.claudinho
@@ -35,23 +35,16 @@ local json = require("claudinho/json")
 local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
-local VERSAO = "1.3"
+local VERSAO = "1.4"
 
 local PADRAO = {
-    overlay = true,
-    overlay_onde = "canto",        -- "canto" (o Claudinho na pagina) ou "barra" (texto na barra de status)
-    overlay_canto = "superior_direito",
-    overlay_tamanho = 2,           -- 1 mini, 2 pequeno, 3 medio
-    overlay_so_ativo = false,      -- esconde quando o Claude esta parado
-    overlay_animar = false,        -- alterna o quadro a cada busca (mais refresh)
+    overlay = true,                -- a linha "Claude ●○○ 75%" no topo da pagina
     intervalo_leitura = 60,        -- segundos entre buscas enquanto le
     intervalo_painel = 30,         -- segundos entre buscas com o painel aberto
     painel_rotacao = 90,           -- 90: logo "kindle" a esquerda; 270: a direita
     painel_animar = true,
     painel_acordado = true,        -- nao deixa o Kindle dormir com o painel aberto
 }
-
-local CANTOS = { "superior_direito", "superior_esquerdo", "inferior_direito", "inferior_esquerdo" }
 
 -- Estado compartilhado entre as instancias do plugin (o KOReader cria uma
 -- nova ao trocar entre a biblioteca e um livro): assim nada some na troca.
@@ -83,12 +76,8 @@ local function ler_config(dir)
 end
 
 function Claudinho:init()
+    -- o KOReader passa "plugins/claudinho.koplugin" (relativo) ou um caminho absoluto
     self.dir = self.path or (debug.getinfo(1, "S").source:sub(2):match("(.*)/") or ".")
-    -- o KOReader passa "plugins/claudinho.koplugin" (relativo); o Font:getFace so
-    -- aceita caminho de arquivo se comecar com "/" ou "./"
-    if not self.dir:match("^/") and not self.dir:match("^%./") then
-        self.dir = "./" .. self.dir
-    end
     self.cfg = ler_config(self.dir)
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/claudinho.lua")
     -- um config.lua novo (rodou o setup no PC e copiou de novo) vale mais que o menu
@@ -122,13 +111,30 @@ function Claudinho:token() return self.settings:readSetting("token") or self.cfg
 
 -- ------------------------------------------------------------------ fontes
 
+--- A pasta do plugin como caminho absoluto.
+local function absoluto(dir)
+    if dir:match("^/") then return dir end
+    local ok, lfs = pcall(require, "libs/libkoreader-lfs")
+    local atual = ok and type(lfs) == "table" and lfs.currentdir and lfs.currentdir() or os.getenv("PWD")
+    if not atual then return dir end
+    return atual .. "/" .. dir:gsub("^%./", "")
+end
+
+--- Caminho de uma fonte do plugin para o Font:getFace. Ate o KOReader 2026.07 ele
+--- poe a pasta de fontes na frente de qualquer nome, ate de um caminho absoluto
+--- ("./fonts//mnt/us/..."), e a fonte nao abre. Subindo ate a raiz a partir da
+--- pasta de fontes, o mesmo caminho funciona nas versoes antigas e nas novas.
+function Claudinho:arquivo_fonte(nome)
+    return string.rep("../", 32) .. absoluto(self.dir):gsub("^/+", "") .. "/fonts/" .. nome
+end
+
 function Claudinho:fonte()
     if self._fonte then return self._fonte end
     local arquivos = {
-        inter800 = self.dir .. "/fonts/InterTight-ExtraBold.ttf",
-        inter900 = self.dir .. "/fonts/InterTight-Black.ttf",
-        mono400 = self.dir .. "/fonts/JetBrainsMono-Regular.ttf",
-        mono700 = self.dir .. "/fonts/JetBrainsMono-Bold.ttf",
+        inter800 = self:arquivo_fonte("InterTight-ExtraBold.ttf"),
+        inter900 = self:arquivo_fonte("InterTight-Black.ttf"),
+        mono400 = self:arquivo_fonte("JetBrainsMono-Regular.ttf"),
+        mono700 = self:arquivo_fonte("JetBrainsMono-Bold.ttf"),
     }
     -- o Font:getFace escala o tamanho pela tela; aqui queremos o pixel exato
     local s = Screen:scaleBySize(1000) / 1000
@@ -150,9 +156,9 @@ local function avisar(onde, err)
     logger.warn("Claudinho: erro em", onde, err)
 end
 
--- o minimo para o painel e o overlay desenharem se ate o "sem sinal" falhar
+-- o minimo para o painel e a linha do topo desenharem se ate o "sem sinal" falhar
 local VISTA_MINIMA = {
-    modo = "sem_sinal", grupo = "sem_sinal", titulo = "Claudinho", linha = "", agentes = "", ferramenta = "",
+    modo = "sem_sinal", grupo = "sem_sinal", titulo = "Claudinho", linha = "", agentes = "", ativos = 0, ferramenta = "",
     descricao = "", antes = "", sessao = { txt = "--", zera = "" }, semana = { txt = "--", zera = "" },
     tokens_hoje = "--", tokens_hora = "", tokens_media = "", rev = "", idioma = "",
 }
@@ -253,176 +259,151 @@ function Claudinho:atualizar_vistas()
         local ok, err = pcall(self.painel.novo_estado, self.painel)
         if not ok then avisar("painel", err) end
     end
-    self:atualizar_overlay()
+    self:atualizar_linha()
 end
 
--- ------------------------------------------------------------------ overlay
+-- ------------------------------------------------------------------ linha do topo
 
-function Claudinho:celula_overlay()
-    local fator = math.max(1, math.floor(math.min(Screen:getWidth(), Screen:getHeight()) / 600 + 0.5))
-    return self:opt("overlay_tamanho") * fator
+-- distancias em pixels do Kindle de 600x800: do topo da pagina (ou do cabecalho
+-- do livro) ate a linha, e da linha ate o texto
+local LINHA_TOPO, LINHA_RESPIRO = 4, 4
+
+--- Pixels reais por pixel do Kindle de 600x800, como o KOReader escala a interface.
+local function escala() return Screen:scaleBySize(1000) / 1000 end
+
+--- Altura do cabecalho do livro (titulo, pagina... no topo), se estiver ligado.
+function Claudinho:cabecalho()
+    local ui = self.ui
+    if not (ui and ui.view and ui.view.view_mode == "page" and ui.document and ui.document.getHeaderHeight) then
+        return 0
+    end
+    local ok, h = pcall(ui.document.getHeaderHeight, ui.document)
+    return ok and tonumber(h) or 0
 end
 
---- O que o overlay deveria mostrar agora: (visivel, quadro, estilo).
-function Claudinho:overlay_alvo()
-    if not self:opt("overlay") or self:opt("overlay_onde") == "barra" then return false end
-    local v = self:vista()
-    local g = v.grupo
-    if self:opt("overlay_so_ativo") and (g == "descansando" or g == "sem_sinal") then
-        return false
-    end
-    local estilo = (g == "aprovacao" and "alerta") or (g == "sem_sinal" and "apagado") or "normal"
-    local quadro = E.quadro_parado(v.modo)
-    if self:opt("overlay_animar") and (self.fase or 0) % 2 == 1 then
-        quadro = quadro:gsub("_1$", "_2")
-    end
-    return true, quadro, estilo
+--- O que a linha mostra agora (nil se desligada) e uma chave que muda junto com ela.
+function Claudinho:linha_alvo()
+    if not self:opt("overlay") then return nil end
+    local info = E.linha_topo(self:vista())
+    return info, string.format("%s|%s|%d", tostring(info.estado), info.pct, info.agentes)
 end
 
-function Claudinho:overlay_retangulo()
-    local cel = self:celula_overlay()
-    local w, h = D.tamanho_overlay(sprites, cel)
-    local sw, sh = Screen:getWidth(), Screen:getHeight()
-    local m = Screen:scaleBySize(8)
-    local baixo = m
-    local view = self.ui and self.ui.view
-    if view and view.footer_visible and view.footer then
-        local ok, fh = pcall(view.footer.getHeight, view.footer)
-        if ok and fh then baixo = m + fh end
+--- A faixa da linha: centralizada no topo, logo abaixo do cabecalho do livro.
+--- `w` e a largura da imagem (sem ela, valem so a altura e a posicao).
+function Claudinho:linha_retangulo(w)
+    local s = escala()
+    w = w or 0
+    return Geom:new{
+        x = math.floor((Screen:getWidth() - w) / 2),
+        y = self:cabecalho() + math.floor(LINHA_TOPO * s + 0.5),
+        w = w,
+        h = math.floor(D.LINHA.altura * s + 0.5),
+    }
+end
+
+--- A imagem da linha, refeita so quando o que ela mostra muda: o desenho roda a
+--- cada pagina virada.
+function Claudinho:imagem_linha(info, chave)
+    if self.linha_img and self.linha_chave == chave then return self.linha_img end
+    if not self.desenho_linha then
+        self.desenho_linha = D.novo(Blitbuffer, RenderText, self:fonte(), sprites, 1)
     end
-    local canto = self:opt("overlay_canto")
-    local x = canto:find("esquerdo") and m or (sw - w - m)
-    local y = canto:find("superior") and m or (sh - h - baixo)
-    return Geom:new{ x = x, y = y, w = w, h = h }, cel
+    if self.linha_img then self.linha_img:free() end
+    self.linha_img, self.linha_chave = nil, nil
+    self.linha_img = self.desenho_linha:linha_topo(info, escala())
+    self.linha_chave = chave
+    return self.linha_img
 end
 
 --- Chamado pelo ReaderView a cada pagina: um erro aqui quebraria a leitura.
-function Claudinho:pintar_overlay(bb, x, y)
-    local ok, err = pcall(self.desenhar_overlay, self, bb, x, y)
+function Claudinho:pintar_linha(bb, x, y)
+    local ok, err = pcall(self.desenhar_linha, self, bb, x, y)
     if not ok then
-        self.overlay_pintado = nil
-        avisar("desenho do overlay", err)
+        self.linha_pintada = nil
+        avisar("desenho da linha", err)
     end
 end
 
-function Claudinho:desenhar_overlay(bb, x, y)
-    local visivel, quadro, estilo = self:overlay_alvo()
-    self.overlay_pintado = visivel and (quadro .. estilo) or nil
-    if not visivel then return end
-    local r, cel = self:overlay_retangulo()
-    self.overlay_rect = r
-    if not self.desenho_overlay then
-        self.desenho_overlay = D.novo(Blitbuffer, RenderText, self:fonte(), sprites, 1)
-    end
-    self.desenho_overlay:overlay(bb, x + r.x, y + r.y, quadro, cel, estilo)
+function Claudinho:desenhar_linha(bb, x, y)
+    local info, chave = self:linha_alvo()
+    self.linha_pintada = chave
+    if not info then return end
+    local img = self:imagem_linha(info, chave)
+    local r = self:linha_retangulo(img:getWidth())
+    bb:blitFrom(img, x + r.x, y + r.y, 0, 0, r.w, r.h)
 end
 
---- Pede para repintar so o cantinho, e so se algo mudou. Chamado depois de cada
---- busca e de cada opcao do menu; um erro aqui nao pode subir para o KOReader.
-function Claudinho:atualizar_overlay(forcar)
-    local ok, err = pcall(self.pedir_overlay, self, forcar)
-    if not ok then avisar("overlay", err) end
+--- Pede para repintar so a faixa da linha, e so se ela mudou. Chamado depois de
+--- cada busca e de cada opcao do menu; um erro aqui nao pode subir para o KOReader.
+function Claudinho:atualizar_linha(forcar)
+    local ok, err = pcall(self.pedir_linha, self, forcar)
+    if not ok then avisar("linha do topo", err) end
 end
 
-function Claudinho:pedir_overlay(forcar)
+function Claudinho:pedir_linha(forcar)
     if not self.leitor or self.painel or self.fechado then return end
-    self:atualizar_barra(forcar)
-    if self:opt("overlay_animar") then self.fase = (self.fase or 0) + 1 end
-    local visivel, quadro, estilo = self:overlay_alvo()
-    local chave = visivel and (quadro .. estilo) or nil
-    if not forcar and chave == self.overlay_pintado then return end
-    local antes = self.overlay_rect
-    local agora = self:overlay_retangulo()
-    local area = antes and antes:combine(agora) or agora
+    local _, chave = self:linha_alvo()
+    if not forcar and chave == self.linha_pintada then return end
+    -- a largura muda ("9%" -> "10%", "×3"): refresca a faixa toda
+    local r = self:linha_retangulo()
+    local area = Geom:new{ x = 0, y = r.y, w = Screen:getWidth(), h = r.h }
     UIManager:setDirty(self.ui, function() return "ui", area end)
 end
 
--- ------------------------------------------------------------------ barra de status
+-- ------------------------------------------------------------------ espaco para a linha
 
---- O que vai na barra de status do KOReader no modo "na barra" (nil: nada).
-function Claudinho:texto_barra()
-    if not self:opt("overlay") or self:opt("overlay_onde") ~= "barra" then return nil end
-    return E.texto_barra(self:vista(), self:opt("overlay_so_ativo"))
+-- O KOReader so tem as 4 margens da pagina: nao da para o texto contornar so a
+-- linha. Entao a margem de cima sobe o bastante para ela ficar fora do texto. So a
+-- margem aplicada muda: a que o KOReader grava no livro (configurable) continua a
+-- sua, e volta quando voce desliga a linha.
+
+--- A margem de cima que deixa a linha fora do texto, na unidade do menu de margens,
+--- ou nil se as margens `m` (padrao: as da pagina agora) ja bastam.
+--- So para livros de texto (EPUB, FB2...): os de pagina fixa (PDF) nao tem margem.
+function Claudinho:margem_necessaria(m)
+    local typeset = self.ui and self.ui.rolling and self.ui.typeset
+    m = m or (typeset and typeset.unscaled_margins)
+    if type(m) ~= "table" or not self:opt("overlay") then return nil end
+    local r = self:linha_retangulo()
+    local cab = self:cabecalho()
+    local fim = r.y + r.h + math.floor(LINHA_RESPIRO * escala() + 0.5)
+    if fim <= cab + Screen:scaleBySize(tonumber(m[2]) or 0) then return nil end
+    return math.ceil((fim - cab) / escala())
 end
 
---- Poe (ou tira) o texto do Claudinho na barra de status, pelo "conteudo externo"
---- do rodape do KOReader (o mesmo que o plugin do timer de leitura usa).
-function Claudinho:ligar_barra(ligar)
-    local footer = self.ui and self.ui.view and self.ui.view.footer
-    if not (footer and footer.addAdditionalFooterContent) then return end
-    if ligar and not self.barra_func then
-        self.barra_func = function()
-            local ok, t = pcall(self.texto_barra, self)
-            if not ok then avisar("barra de status", t) end
-            return ok and t or nil
-        end
-        footer:addAdditionalFooterContent(self.barra_func)
-        self.barra_texto = nil
-        self:atualizar_barra(true)
-    elseif not ligar and self.barra_func then
-        footer:removeAdditionalFooterContent(self.barra_func)
-        self.barra_func, self.barra_texto = nil, nil
-        UIManager:broadcastEvent(Event:new("UpdateFooter", true))
-    end
+--- As margens que voce escolheu no menu de baixo (as que o KOReader grava no livro).
+function Claudinho:margens_suas()
+    local c = self.ui and self.ui.document and self.ui.document.configurable
+    if type(c) ~= "table" or type(c.h_page_margins) ~= "table" then return nil end
+    return { c.h_page_margins[1], c.t_page_margin, c.h_page_margins[2], c.b_page_margin }
 end
 
---- Pede ao rodape para redesenhar so se o texto mudou.
-function Claudinho:atualizar_barra(forcar)
-    if not self.barra_func then return end
-    local t = self:texto_barra() or ""
-    if not forcar and t == self.barra_texto then return end
-    self.barra_texto = t
-    UIManager:broadcastEvent(Event:new("RefreshAdditionalContent"))
+--- As margens que a pagina deveria ter: as suas, com a de cima aumentada se a linha
+--- cobriria o texto. Depende so de a linha estar ligada, nao do que o Claude esta
+--- fazendo: cada troca de margem faz o KOReader paginar o livro de novo.
+function Claudinho:margens_alvo()
+    local m = self:margens_suas()
+    if not m then return nil end
+    m[2] = self:margem_necessaria(m) or m[2]
+    return m
 end
 
--- ------------------------------------------------------------------ o overlay cobre o texto?
-
---- Se o Claudinho no canto cobre o texto do livro, devolve qual margem resolveria
---- ("cima" ou "baixo") e o valor minimo dela, na unidade do menu de margens.
---- So para livros de texto (EPUB, FB2...): nos de pagina fixa (PDF) nao da para saber.
-function Claudinho:margem_necessaria()
-    local ui = self.ui
-    local typeset = ui and ui.rolling and ui.typeset
-    local m = typeset and typeset.unscaled_margins
-    if type(m) ~= "table" or not self:opt("overlay") or self:opt("overlay_onde") == "barra" then return nil end
-    local r = self:overlay_retangulo()
-    local sw, sh = Screen:getWidth(), Screen:getHeight()
-    local esq, dir = Screen:scaleBySize(tonumber(m[1]) or 0), Screen:scaleBySize(tonumber(m[3]) or 0)
-    if r.x >= sw - dir or r.x + r.w <= esq then return nil end      -- fica so na margem do lado
-    local escala = Screen:scaleBySize(1000) / 1000
-    if self:opt("overlay_canto"):find("superior") then
-        local cabecalho = 0
-        if ui.view and ui.view.view_mode == "page" and ui.document and ui.document.getHeaderHeight then
-            local ok, h = pcall(ui.document.getHeaderHeight, ui.document)
-            if ok and tonumber(h) then cabecalho = tonumber(h) end
-        end
-        local topo = cabecalho + Screen:scaleBySize(tonumber(m[2]) or 0)
-        if r.y + r.h <= topo then return nil end
-        return "cima", math.ceil((r.y + r.h + 2 - cabecalho) / escala)
-    end
-    local rodape = 0
-    local view = ui.view
-    if view and view.footer_visible and view.footer and not view.footer.reclaim_height then
-        local ok, fh = pcall(view.footer.getHeight, view.footer)
-        if ok and tonumber(fh) then rodape = tonumber(fh) end
-    end
-    local fundo = sh - rodape - Screen:scaleBySize(tonumber(m[4]) or 0)
-    if r.y >= fundo then return nil end
-    return "baixo", math.ceil((sh - rodape - r.y + 2) / escala)
+--- Aplica as margens alvo, se a pagina estiver com outras (do mesmo jeito que o
+--- ReaderTypeset faz). Chamado antes de paginar o livro e a cada mudanca de margem.
+function Claudinho:ajustar_margem()
+    local typeset = self.ui and self.ui.rolling and self.ui.typeset
+    if not (typeset and typeset.unscaled_margins) then return end
+    local alvo = self:margens_alvo()
+    if not alvo then return end
+    local atual = typeset.unscaled_margins
+    if atual[1] == alvo[1] and atual[2] == alvo[2] and atual[3] == alvo[3] and atual[4] == alvo[4] then return end
+    typeset.unscaled_margins = alvo
+    self.ui:handleEvent(Event:new("SetPageMargins", alvo))
 end
 
---- Avisa uma vez (por canto e tamanho) quando o Claudinho cobre o texto.
-function Claudinho:avisar_margem()
-    local ok, qual, valor = pcall(self.margem_necessaria, self)
-    if not ok then return avisar("margem", qual) end
-    if not qual then return end
-    local chave = self:opt("overlay_canto") .. ":" .. tostring(self:opt("overlay_tamanho"))
-    if self.settings:readSetting("aviso_margem") == chave then return end
-    self:salvar("aviso_margem", chave)
-    UIManager:show(InfoMessage:new{
-        text = L.t("aviso_cobre", L.t(qual == "cima" and "margem_cima" or "margem_baixo"), valor),
-        timeout = 12,
-    })
+function Claudinho:reservar_espaco()
+    local ok, err = pcall(self.ajustar_margem, self)
+    if not ok then avisar("margem automatica", err) end
 end
 
 -- ------------------------------------------------------------------ painel
@@ -498,19 +479,25 @@ end
 function Claudinho:onReaderReady()
     if not (self.ui.view and self.ui.view.registerViewModule) then return end
     self.leitor = true
-    self.overlay_modulo = { paintTo = function(_, bb, x, y) self:pintar_overlay(bb, x, y) end }
+    self.overlay_modulo = { paintTo = function(_, bb, x, y) self:pintar_linha(bb, x, y) end }
     self.ui.view:registerViewModule("claudinho", self.overlay_modulo)
-    if self:opt("overlay") and self:opt("overlay_onde") == "barra" then
-        self:ligar_barra(true)
-    end
-    UIManager:nextTick(function() if not self.fechado then self:avisar_margem() end end)
+    self:reservar_espaco()
     self:reiniciar(2)
 end
 
---- Margens mudaram no menu de baixo: confere de novo se o Claudinho cobre o texto.
+--- Antes da primeira paginacao do livro: reservando o espaco aqui, o livro e
+--- paginado uma vez so ao abrir.
+function Claudinho:onPreRenderDocument()
+    self:reservar_espaco()
+end
+
+--- Margens mudaram (no menu de baixo, ou a barra de status apareceu): reserva o
+--- espaco de novo.
 function Claudinho:onSetPageMargins()
     if self.leitor and not self.fechado then
-        UIManager:nextTick(function() if not self.fechado then self:avisar_margem() end end)
+        UIManager:nextTick(function()
+            if not self.fechado then self:reservar_espaco() end
+        end)
     end
 end
 
@@ -542,6 +529,10 @@ function Claudinho:onCloseWidget()
     self.fechado = true
     UIManager:unschedule(self.tarefa)
     if self.painel then UIManager:close(self.painel) end
+    if self.linha_img then
+        self.linha_img:free()
+        self.linha_img, self.linha_chave = nil, nil
+    end
 end
 
 -- O Dispatcher guarda estas tabelas como vieram (e ignora um segundo registro com o
@@ -574,27 +565,22 @@ function Claudinho:alternar_overlay()
     self:salvar("overlay", ligado)
     Notification:notify(L.t(ligado and "overlay_ligado" or "overlay_desligado"), Notification.SOURCE_ALWAYS_SHOW)
     self:lugar_mudou()
-    self:atualizar_overlay(true)
+    self:atualizar_linha(true)
     self:reiniciar(0)
 end
 
 -- ------------------------------------------------------------------ menu
 
--- opcoes que mudam onde e de que tamanho o Claudinho aparece na leitura
-local MUDA_LUGAR = { overlay = true, overlay_onde = true, overlay_canto = true, overlay_tamanho = true }
-
---- Depois de mudar onde o Claudinho aparece: liga/desliga a barra de status e
---- confere se o canto escolhido cobre o texto.
+--- Depois de ligar ou desligar a linha: reserva (ou devolve) o espaco dela.
 function Claudinho:lugar_mudou()
     if not self.leitor or self.fechado then return end
-    self:ligar_barra(self:opt("overlay") and self:opt("overlay_onde") == "barra")
-    self:avisar_margem()
+    self:reservar_espaco()
 end
 
 function Claudinho:mudar(chave, valor, menu)
     self:salvar(chave, valor)
-    if MUDA_LUGAR[chave] then self:lugar_mudou() end
-    self:atualizar_overlay(true)
+    if chave == "overlay" then self:lugar_mudou() end
+    self:atualizar_linha(true)
     if menu then menu:updateItems() end
 end
 
@@ -688,10 +674,6 @@ function Claudinho:item_idioma(idioma)
 end
 
 function Claudinho:addToMainMenu(menu_items)
-    local cantos = {}
-    for _, c in ipairs(CANTOS) do
-        cantos[#cantos + 1] = self:item_radio("canto_" .. c, "overlay_canto", c)
-    end
     local function intervalos(chave, opcoes)
         local t = {}
         for _, s in ipairs(opcoes) do
@@ -719,21 +701,7 @@ function Claudinho:addToMainMenu(menu_items)
                 end,
                 separator = true,
             },
-            submenu("menu_overlay", {
-                self:item_liga("menu_mostrar", "overlay", function() self:reiniciar(0) end),
-                submenu("menu_onde", {
-                    self:item_radio("onde_canto", "overlay_onde", "canto"),
-                    self:item_radio("onde_barra", "overlay_onde", "barra"),
-                }),
-                submenu("menu_canto", cantos),
-                submenu("menu_tamanho", {
-                    self:item_radio("tamanho_1", "overlay_tamanho", 1),
-                    self:item_radio("tamanho_2", "overlay_tamanho", 2),
-                    self:item_radio("tamanho_3", "overlay_tamanho", 3),
-                }),
-                self:item_liga("menu_esconder", "overlay_so_ativo"),
-                self:item_liga("menu_animar_overlay", "overlay_animar"),
-            }),
+            self:item_liga("menu_linha", "overlay", function() self:reiniciar(0) end),
             submenu("menu_painel", {
                 self:item_radio("menu_logo_esquerda", "painel_rotacao", 90),
                 self:item_radio("menu_logo_direita", "painel_rotacao", 270),

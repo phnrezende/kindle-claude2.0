@@ -21,10 +21,11 @@ curl -H "Authorization: Bearer SEU_TOKEN" http://localhost:8787/estado.json
 | "sem resposta" / "tempo esgotado" | IP do PC mudou, firewall, ou agente parado | confira o IP (`python3 pc/setup.py connection`), libere a porta 8787 no firewall, deixe o `claudinho.py` rodando |
 | "Wi-Fi desligado" | o Kindle está sem rede | ligue o Wi-Fi no KOReader |
 | Sempre "Fogão desligado" | os hooks não estão chegando | reinicie as sessões do Claude Code abertas antes do setup; confira `pc/data/state.json` |
-| "--" no % da sessão e da semana | plano sem `rate_limits`, ou ainda sem resposta na sessão | aparece depois da primeira resposta, nos planos Pro/Max |
+| "--" no % da sessão e da semana, no painel (0% na linha do topo) | plano sem `rate_limits`, ou ainda sem resposta na sessão | aparece depois da primeira resposta, nos planos Pro/Max |
+| "--" na linha do topo, sem bolinha cheia | sem sinal do PC | veja as linhas de "sem resposta" acima |
 | Painel em inglês (ou em português) sem querer | o idioma segue o do KOReader | Claudinho → Idioma (*Language*) e escolha o idioma |
-| Overlay cobre o texto | com as margens padrão, cobre o fim das primeiras linhas | aumente a margem que o aviso indicar (Margens, no menu de baixo) ou use Claudinho → Overlay na leitura → Onde mostrar → Na barra de status |
-| Nada aparece na barra de status | a barra está escondida | toque embaixo da página para mostrar a barra de status do KOReader |
+| A linha do topo cobre o começo da página | é um PDF (página fixa, sem margem para aumentar) | desligue em Claudinho → Mostrar o status no topo da página |
+| A margem de cima ficou maior | a linha do topo reserva o espaço dela (de 15 para 28, com as margens padrão); o KOReader não tem como reservar só a faixa do meio | é o custo de não cobrir o texto; desligando a linha, a sua margem volta |
 | Painel de cabeça para baixo do jeito que você segura | lado do logo | Claudinho → Painel → Logo do Kindle à direita |
 | Kindle dorme com o painel aberto | opção desligada | Claudinho → Painel → Não deixar o Kindle dormir |
 | Fantasmas no painel | e-ink | o painel faz refresh completo a cada 10 trocas (estados novos ou minutos, então no máximo a cada 10 min); trocar de estado também limpa |

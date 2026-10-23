@@ -88,17 +88,26 @@ O agente responde em todas as redes em que o computador estiver. Para responder 
 
 O Kindle calcula a diferença entre o relógio dele e o do PC a cada resposta completa (o `agora` do estado). O "há X min" usa essa correção, então um Kindle com a hora errada não mostra tempos absurdos. O relógio grande do painel é o do Kindle.
 
-### Overlay
+### Linha do topo
 
-O overlay é registrado como um *view module* do leitor (`ReaderView:registerViewModule`), o mesmo mecanismo que o KOReader usa para a orelha de marcador e o rodapé. Por isso:
+A linha "Claude ●○○ 75%" é registrada como um *view module* do leitor (`ReaderView:registerViewModule`), o mesmo mecanismo que o KOReader usa para a orelha de marcador e o rodapé. Por isso:
 
-- ele é desenhado junto com cada página, sem piscar a mais na virada;
-- quando o estado muda, o plugin pede refresh **só do retângulo do cantinho** (`ui`), e só se o quadro ou o estilo mudaram;
-- não há animação por padrão: são três desenhos fixos, para não gastar bateria nem deixar fantasma no e-ink.
+- ela é desenhada junto com cada página, sem piscar a mais na virada;
+- a imagem dela (texto em Inter Tight, bolinhas desenhadas como círculos com antialiasing, pílula preta pedindo permissão) é feita uma vez e reaproveitada a cada página, até o que ela mostra mudar;
+- quando muda (estado, % ou número de agentes), o plugin pede refresh **só da faixa dela** (`ui`), na largura toda, porque a largura muda junto ("9%" → "10%", "×3").
 
-O overlay é desenhado por cima da página. Nos livros de texto (EPUB, FB2…), o plugin compara a caixa com as margens do livro e, se ela cobre texto, avisa uma vez (por canto e tamanho) com a margem que resolve. Com as margens padrão do KOReader (15 em cima e embaixo), no Kindle básico o tamanho pequeno pede 66. Nos PDFs não dá para saber onde fica o texto, e o aviso não aparece.
+O que ela mostra sai de `E.linha_topo` (`claudinho/estado.lua`): a bolinha 1 para parado e terminou, 2 para trabalhando, 3 para pedindo permissão; o `%` da sessão de 5 h, limitado entre 0 e 100; e, com mais de um agente trabalhando ou pedindo permissão, "Claude ×N". Sem o `%` (plano sem limite, ou janela nova sem resposta ainda), mostra 0%: nada foi gasto de um limite que não existe ou acabou de começar. Só sem sinal do PC mostra "--", porque aí o Kindle não sabe, e um 0% pareceria um número de verdade.
 
-**Na barra de status**: em vez do desenho, o plugin põe um texto curto ("Claude: TE CHAMANDO!") no "conteúdo externo" do rodapé do KOReader, o mesmo mecanismo do plugin de timer de leitura. Nunca cobre o texto, mas só aparece com a barra de status visível.
+Fica centralizada, 4 px abaixo do topo (ou do cabeçalho do livro, se ele estiver ligado), com 20 px de altura no Kindle básico.
+
+**O espaço dela**: o mecanismo de texto do KOReader (crengine) só aceita as quatro margens da página (`setPageMargins`), e as linhas são calculadas antes de serem divididas em páginas; por isso não dá para o texto contornar só a linha. Nos livros de texto (EPUB, FB2…), o plugin aumenta a margem de cima até a linha caber, mais 4 px de respiro: com as margens padrão do KOReader, de 15 para 28. Detalhes:
+
+- muda só a margem aplicada (`ReaderTypeset.unscaled_margins`), com o mesmo evento `SetPageMargins` que o KOReader usa. A que o KOReader grava no livro (`configurable.t_page_margin`) continua a sua, e é a ela que o plugin volta quando você desliga a linha;
+- ajusta no `PreRenderDocument`, antes da primeira paginação, então o livro é paginado uma vez só ao abrir;
+- depende só de a linha estar ligada, não do que o Claude está fazendo: cada troca de margem faz o KOReader paginar o livro de novo;
+- se você mudar a margem no menu de baixo para menos que o necessário, a página continua com o necessário (e o livro guarda o que você escolheu); para mais, vale a sua.
+
+Nos PDFs a página é fixa: a margem não muda, e a linha pode cobrir o começo da página.
 
 ### Painel
 
@@ -115,4 +124,4 @@ O KOReader abre fontes variáveis só no peso padrão. Por isso o plugin traz In
 
 ## Bateria
 
-Não foi medida no aparelho. O que mais gasta é o Wi-Fi ligado. Lendo com o overlay, são uma busca pequena por minuto e um refresh minúsculo só quando o estado muda. O painel aberto, com animação, gasta bem mais: deixe no carregador.
+Não foi medida no aparelho. O que mais gasta é o Wi-Fi ligado. Lendo com a linha do topo, são uma busca pequena por minuto e um refresh minúsculo só quando ela muda. O painel aberto, com animação, gasta bem mais: deixe no carregador.

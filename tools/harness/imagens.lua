@@ -40,7 +40,7 @@ for nome, dados in pairs(telas) do
     H.salvar_pgm(bb, SAIDA .. "/painel-" .. nome .. ".pgm")
 end
 
--- pagina de livro com o overlay no canto
+-- pagina de livro com a linha do topo
 local TEXTO = {
     "Capítulo 3",
     "",
@@ -50,37 +50,57 @@ local TEXTO = {
     "fogão e começava a cozinhar: um pouco de Read,",
     "uma pitada de Grep, uma panela inteira de Edit.",
     "",
-    "Do outro lado da sala, num Kindle antigo, um",
-    "Claudinho menor ainda acompanhava tudo do canto",
-    "da página, sem atrapalhar a leitura. Quando o",
-    "chef precisava de uma resposta, o cantinho",
-    "ficava preto e tocava o sino.",
+    "Do outro lado da sala, num Kindle antigo, uma",
+    "linha pequena no topo da página acompanhava",
+    "tudo sem atrapalhar a leitura. Quando o chef",
+    "precisava de uma resposta, a linha ficava preta",
+    "e a terceira bolinha acendia.",
     "",
     "A leitora levantava os olhos do livro, dava uma",
     "espiada no computador e voltava para a história.",
 }
-local function pagina(quadro, estilo, arquivo)
+local function linha_de(dados)
+    return E.linha_topo(E.interpretar(dados, agora, { recebido_em = agora, desvio = 0 }))
+end
+local function pagina(info, arquivo)
     local bb = BB.new(600, 800, BB.TYPE_BB8)
     bb:fill(BB.COLOR_WHITE)
     local face = H.fonte("mono400", 17)
     for i, linha in ipairs(TEXTO) do
-        H.RT:renderUtf8Text(bb, 48, 120 + (i - 1) * 34, face, linha, true, false, BB.COLOR_BLACK)
+        H.RT:renderUtf8Text(bb, 48, 54 + (i - 1) * 34, face, linha, true, false, BB.COLOR_BLACK)
     end
     local rodape = H.fonte("mono400", 13)
     H.RT:renderUtf8Text(bb, 48, 780, rodape, "Página 42 de 310", true, false, BB.Color8(0x55))
-    local w = D.tamanho_overlay(sprites, 2)
-    d:overlay(bb, 600 - w - 8, 8, quadro, 2, estilo)
+    local img = d:linha_topo(info, 1)            -- como o plugin: centralizada, 4 px abaixo do topo
+    bb:blitFrom(img, math.floor((600 - img:getWidth()) / 2), 4, 0, 0, img:getWidth(), img:getHeight())
+    img:free()
     H.salvar_pgm(bb, SAIDA .. "/" .. arquivo)
 end
-pagina("sopa_1", "normal", "leitura-trabalhando.pgm")
-pagina("esperando_1", "alerta", "leitura-aprovacao.pgm")
-pagina("descansando_1", "normal", "leitura-descansando.pgm")
+local uso = { sessao = { pct = 75, hora = "15:00" } }
+pagina(linha_de(com{ modo = "cozinhando", desde = agora - 7, sessao = uso.sessao }), "leitura-trabalhando.pgm")
+pagina(linha_de(com{ modo = "chamando", desde = agora - 40, sessao = uso.sessao }), "leitura-aprovacao.pgm")
+pagina(linha_de(com{ modo = "descansando", desde = agora - 2700, sessao = uso.sessao }), "leitura-descansando.pgm")
 
--- folha com os estilos do overlay
-local w, h = D.tamanho_overlay(sprites, 3)
-local casos = { { "sopa_1", "normal" }, { "esperando_1", "alerta" }, { "prato_1", "normal" },
-    { "descansando_1", "normal" }, { "descansando_1", "apagado" } }
-local bb = BB.new((w + 16) * #casos + 16, h + 32, BB.TYPE_BB8)
+-- folha com os estados da linha, em tamanho dobrado
+local casos = {
+    linha_de(com{ modo = "descansando", desde = agora - 2700, sessao = uso.sessao }),
+    linha_de(com{ modo = "cozinhando", desde = agora - 7, sessao = uso.sessao }),
+    linha_de(com{ modo = "chamando", desde = agora - 40, sessao = uso.sessao }),
+    linha_de(com{ modo = "cozinhando", desde = agora - 7, ativos = 3, sessao = uso.sessao }),
+    E.linha_topo(E.interpretar(nil, agora, {})),
+}
+local imgs, largura, altura = {}, 0, 16
+for i, info in ipairs(casos) do
+    imgs[i] = d:linha_topo(info, 2)
+    largura = math.max(largura, imgs[i]:getWidth())
+    altura = altura + imgs[i]:getHeight() + 16
+end
+local bb = BB.new(largura + 32, altura, BB.TYPE_BB8)
 bb:fill(BB.COLOR_WHITE)
-for i, c in ipairs(casos) do d:overlay(bb, 16 + (i - 1) * (w + 16), 16, c[1], 3, c[2]) end
-H.salvar_pgm(bb, SAIDA .. "/overlay-estados.pgm")
+local y = 16
+for _, img in ipairs(imgs) do
+    bb:blitFrom(img, 16, y, 0, 0, img:getWidth(), img:getHeight())
+    y = y + img:getHeight() + 16
+    img:free()
+end
+H.salvar_pgm(bb, SAIDA .. "/linha-estados.pgm")
