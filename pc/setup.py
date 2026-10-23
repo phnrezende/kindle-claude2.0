@@ -8,6 +8,12 @@
 Without questions (for scripts):
     python3 setup.py --no-prompt [--ip 192.168.0.10] [--port 8787] [--token X]
     --no-hooks    leave ~/.claude/settings.json alone
+    --new-token   make a new token (copy the plugin to the Kindle again afterwards)
+    --shell bash|powershell
+                  Windows only: which shell Claude Code runs the commands with.
+                  By default, bash when Git Bash is installed, PowerShell otherwise.
+
+If CLAUDE_CONFIG_DIR is set, its settings.json is used instead of ~/.claude.
 
 When it finishes it writes:
     pc/config.json                         what the agent (claudinho.py) uses
@@ -35,14 +41,11 @@ CONFIG = os.path.join(BASE, "config.json")
 ORIG = os.path.join(DATA, "orig_statusline.txt")
 PLUGIN = os.path.join(ROOT, "kindle", "claudinho.koplugin")
 PLUGIN_CONFIG = os.path.join(PLUGIN, "config.lua")
-SETTINGS = os.path.expanduser("~/.claude/settings.json")
 PY = sys.executable or "python3"
 HOOK_PATH = os.path.join(BASE, "hook.py")
 STATUS_PATH = os.path.join(BASE, "statusline.py")
 # a marca no fim deixa reconhecer os comandos do Claudinho mesmo se a pasta mudar
 MARCA = "--claudinho"
-HOOK_CMD = f'"{PY}" "{HOOK_PATH}" {MARCA}'
-STATUS_CMD = f'"{PY}" "{STATUS_PATH}" {MARCA}'
 EVENTS = {"PreToolUse": "*", "PostToolUse": "*", "PostToolUseFailure": "*", "UserPromptSubmit": None,
           "Notification": None, "Stop": None, "StopFailure": None, "SessionEnd": None}
 # um comando como os nossos: "python" ".../pc/hook.py"
@@ -50,6 +53,30 @@ CAMINHO_PC = re.compile(r'"([^"]*[\\/]pc[\\/](hook|statusline)\.py)"')
 
 sys.path.insert(0, BASE)
 import claudinho  # noqa: E402  (mesmo diretorio)
+import shells  # noqa: E402
+
+SETTINGS = os.path.join(claudinho.pasta_claude(), "settings.json")
+
+
+def comando(script, shell="bash", sistema=None):
+    """O comando que o Claude Code roda para um dos nossos scripts.
+
+    No Windows os caminhos vao com barras normais, que o Git Bash e o PowerShell
+    entendem (o Git Bash come as barras invertidas fora de aspas). No PowerShell,
+    um caminho entre aspas no comeco do comando so roda com o operador &."""
+    py, alvo = PY, script
+    if (sistema or os.name) == "nt":
+        py, alvo = py.replace("\\", "/"), alvo.replace("\\", "/")
+    if shell == "powershell":
+        return f'& "{py}" "{alvo}" {MARCA}'
+    return f'"{py}" "{alvo}" {MARCA}'
+
+
+def deste_repo(cmd, arquivo):
+    """O comando roda o `arquivo` desta pasta (com barras de qualquer tipo)?"""
+    proprio = os.path.join(BASE, arquivo)
+    cmd = cmd or ""
+    return proprio in cmd or proprio.replace("\\", "/") in cmd
 
 
 # ------------------------------------------------------------------ util
@@ -100,27 +127,49 @@ def comando_nosso(cmd, arquivo):
     pasta que nao existe mais (o repositorio mudou de lugar): esses comandos so
     dariam erro, entao sao trocados pelos novos."""
     cmd = cmd or ""
-    if os.path.join(BASE, arquivo) in cmd or (MARCA in cmd and arquivo in cmd):
+    if deste_repo(cmd, arquivo) or (MARCA in cmd and arquivo in cmd):
         return True
     m = CAMINHO_PC.search(cmd)
     return bool(m and m.group(2) + ".py" == arquivo and not os.path.exists(m.group(1)))
 
 
 def is_ours(entry):
-    return any(comando_nosso(h.get("command"), "hook.py") for h in entry.get("hooks", []))
+    if not isinstance(entry, dict):
+        return False
+    return any(isinstance(h, dict) and comando_nosso(h.get("command"), "hook.py")
+               for h in entry.get("hooks") or [])
 
 
 def antigos(entries):
     """Quantos desses hooks sao do Claudinho, mas de outra pasta (que mudou de
     lugar ou e outra copia do repositorio)."""
-    return sum(1 for e in entries for h in e.get("hooks", [])
-               if comando_nosso(h.get("command"), "hook.py") and HOOK_PATH not in (h.get("command") or ""))
+    return sum(1 for e in entries if isinstance(e, dict) for h in e.get("hooks") or []
+               if isinstance(h, dict) and comando_nosso(h.get("command"), "hook.py")
+               and not deste_repo(h.get("command"), "hook.py"))
+
+
+def escolher_shell():
+    """O shell dos comandos gravados: --shell, ou o que o Claude Code usaria aqui."""
+    pedido = args_opt("--shell")
+    if pedido:
+        if pedido not in ("bash", "powershell"):
+            sys.exit("Use --shell bash or --shell powershell.")
+        return pedido
+    shell = shells.shell_do_claude()
+    if os.name == "nt":
+        if shell == "bash":
+            print("Git Bash found: Claude Code runs the commands with bash.")
+        else:
+            print("Git Bash not found: Claude Code runs the commands with PowerShell,"
+                  " so they are written for PowerShell. If you install Git Bash later, run the setup again.")
+    return shell
 
 
 def load_settings():
     if not os.path.exists(SETTINGS):
         return {}
-    with open(SETTINGS, encoding="utf-8") as f:
+    # utf-8-sig: um settings.json salvo com BOM (Bloco de Notas antigo) tambem abre
+    with open(SETTINGS, encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -138,16 +187,23 @@ def save_settings(cfg):
 
 def instalar_hooks():
     titulo("Claude Code hooks and statusLine")
+    shell = escolher_shell()
+    hook_cmd, status_cmd = comando(HOOK_PATH, shell), comando(STATUS_PATH, shell)
     cfg = load_settings()
     hooks = cfg.setdefault("hooks", {})
-    velhos = sum(antigos(lst) for lst in hooks.values())
+    velhos = sum(antigos(lst) for lst in hooks.values() if isinstance(lst, list))
     for event in list(hooks):                     # tira os nossos de todos os eventos
+        if not isinstance(hooks[event], list):
+            continue
         hooks[event] = [e for e in hooks[event] if not is_ours(e)]
         if not hooks[event]:
             del hooks[event]
     for event, matcher in EVENTS.items():
-        lst = hooks.get(event, [])
-        entry = {"hooks": [{"type": "command", "command": HOOK_CMD}]}
+        lst = hooks.get(event) if isinstance(hooks.get(event), list) else []
+        h = {"type": "command", "command": hook_cmd}
+        if shell == "powershell":
+            h["shell"] = "powershell"             # campo "shell" dos hooks: sem adivinhar
+        entry = {"hooks": [h]}
         if matcher:
             entry["matcher"] = matcher
         lst.append(entry)
@@ -157,29 +213,37 @@ def instalar_hooks():
     if velhos:
         print(f"Replaced {velhos} Claudinho hook(s) that pointed to another folder"
               " (an old or moved copy) with the ones from this folder.")
-    current = (cfg.get("statusLine") or {}).get("command", "")
+    atual = cfg.get("statusLine") if isinstance(cfg.get("statusLine"), dict) else {}
+    current = atual.get("command", "")
     if current and not comando_nosso(current, "statusline.py"):
         with open(ORIG, "w", encoding="utf-8") as f:
             f.write(current)
         print("Your old statusLine was saved and will keep showing.")
-    cfg["statusLine"] = {"type": "command", "command": STATUS_CMD}
+    # padding, refreshInterval... da sua statusLine continuam valendo
+    extras = {k: v for k, v in atual.items() if k not in ("type", "command")}
+    cfg["statusLine"] = {**extras, "type": "command", "command": status_cmd}
     save_settings(cfg)
-    print("Hooks are on. Restart any Claude Code sessions that were already open.")
+    print(f"Hooks are on ({SETTINGS}). Restart any Claude Code sessions that were already open.")
 
 
 def remover_hooks():
     cfg = load_settings()
     hooks = cfg.get("hooks", {})
     for event in list(hooks):
+        if not isinstance(hooks[event], list):
+            continue
         hooks[event] = [e for e in hooks[event] if not is_ours(e)]
         if not hooks[event]:
             del hooks[event]
     if not hooks:
         cfg.pop("hooks", None)
-    if comando_nosso((cfg.get("statusLine") or {}).get("command", ""), "statusline.py"):
+    atual = cfg.get("statusLine") if isinstance(cfg.get("statusLine"), dict) else {}
+    if comando_nosso(atual.get("command", ""), "statusline.py"):
         if os.path.exists(ORIG):
-            cfg["statusLine"] = {"type": "command",
-                                 "command": open(ORIG, encoding="utf-8").read().strip()}
+            with open(ORIG, encoding="utf-8") as f:
+                antiga = f.read().strip()
+            extras = {k: v for k, v in atual.items() if k not in ("type", "command")}
+            cfg["statusLine"] = {**extras, "type": "command", "command": antiga}
         else:
             cfg.pop("statusLine", None)
     save_settings(cfg)
@@ -215,7 +279,11 @@ def configurar_conexao():
         print("Remote mode was removed. The Kindle now reads straight from this computer,"
               " on the same network.")
 
-    token = args_opt("--token") or atual.get("token") or secrets.token_urlsafe(18)
+    novo_token = tem_opcao("--new-token", "--novo-token")
+    token = args_opt("--token") or (None if novo_token else atual.get("token")) or secrets.token_urlsafe(18)
+    if novo_token and atual.get("token") and token != atual.get("token"):
+        print("New token made: the old one stops working. Copy the plugin to the Kindle again"
+              " (or type the new token in Claudinho > Connection > Token).")
     ip = args_opt("--ip") or perguntar("This computer's IP on the network", claudinho.ip_local())
 
     porta = porta_valida(args_opt("--port", "--porta", default=atual.get("porta") or 8787))
@@ -228,7 +296,9 @@ def configurar_conexao():
             break
         print("Type a number between 1 and 65535.")
 
-    cfg = {"porta": porta, "token": token}
+    # outras chaves que voce pos no config.json (como "host") continuam la
+    cfg = {k: v for k, v in atual.items() if k not in ("porta", "token", "modo")} if os.path.exists(CONFIG) else {}
+    cfg.update(porta=porta, token=token)
     url = f"http://{ip}:{porta}/estado.json"
     gravar_configs(cfg, url)
     print(f"""
@@ -240,11 +310,11 @@ The Kindle screens can be in English or Portuguese: Claudinho > Language, on the
 
 
 def main():
-    comando = sys.argv[1] if len(sys.argv) > 1 else ""
-    if comando in ("remove", "remover"):
+    acao = sys.argv[1] if len(sys.argv) > 1 else ""
+    if acao in ("remove", "remover"):
         remover_hooks()
         return
-    if comando in ("connection", "conexao", "modo"):
+    if acao in ("connection", "conexao", "modo"):
         configurar_conexao()
         return
     if not tem_opcao("--no-hooks", "--sem-hooks"):

@@ -14,6 +14,7 @@ shutil.copytree(os.path.join(REPO, "kindle"), os.path.join(tmp, "kindle"))
 home = os.path.join(tmp, "home")
 os.makedirs(os.path.join(home, ".claude"))
 env = dict(os.environ, HOME=home, USERPROFILE=home)
+env.pop("CLAUDE_CONFIG_DIR", None)          # nunca le a pasta de verdade de quem roda os testes
 PC = os.path.join(tmp, "pc")
 falhas = 0
 
@@ -179,6 +180,83 @@ e = estado()
 ok(e["ferramenta"] == "Bash" and e["antes"] == ["Read", "Grep"],
    f"varias sessoes: 'antes' sem a ferramenta da barra ({e['antes']})")
 
+print("ferramentas em paralelo")
+limpar()
+P = {"session_id": "par", "cwd": "/x/par"}
+hook({**P, "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_use_id": "r1",
+      "tool_input": {"file_path": "/x/par/a.py"}})
+hook({**P, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "b1",
+      "tool_input": {"description": "Build longo"}})
+hook({**P, "hook_event_name": "PostToolUse", "tool_name": "Read", "tool_use_id": "r1"})
+st = json.load(open(os.path.join(PC, "data", "state.json")))["sessions"]["par"]
+ok(st["tool_running"] and st["tool_name"] == "Bash", "o Read acabou, o build continua rodando")
+v = claudinho.session_view(st, time.time() + 300)
+ok(v[1] == "cozinhando" and v[3] == "Bash", f"5 min depois: ainda o build na barra ({v[1]}, {v[3]!r})")
+e = estado()
+ok(e["ferramenta"] == "Bash" and e["antes"] == ["Read"], f"'antes' sem o build da barra ({e['antes']})")
+hook({**P, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "b1"})
+st = json.load(open(os.path.join(PC, "data", "state.json")))["sessions"]["par"]
+ok(st["tool_running"] is False and "rodando" not in st, "o build acabou: nada rodando")
+
+print("privacidade de outras ferramentas")
+limpar()
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "TaskCreate",
+      "tool_input": {"subject": "Corrigir login", "description": "Cliente ACME reclamou do contrato 123"}})
+e = estado()
+ok(e["descricao"] == "Corrigir login" and "ACME" not in json.dumps(e), f"TaskCreate: so o titulo ({e['descricao']!r})")
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "Grep",
+      "tool_input": {"pattern": "senha_admin", "path": "/Users/eu/clientes/acme"}})
+ok(estado()["descricao"] == "senha_admin", "Grep com pasta: o padrao, nao a pasta")
+hook({**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "sudo -u postgres psql"}})
+ok(estado()["descricao"] == "psql …", "sudo -u usuario: o programa, nao a opcao")
+
+print("Esc e permissao recusada (o historico avisa; os hooks, nao)")
+from datetime import datetime as _datetime, timezone as _tz
+limpar()
+proj_esc = os.path.join(home, ".claude", "projects", "esc")
+os.makedirs(proj_esc, exist_ok=True)
+hist = os.path.join(proj_esc, "s-esc.jsonl")
+open(hist, "w").close()
+ESC = {"session_id": "s-esc", "cwd": "/x/esc", "transcript_path": hist}
+
+
+def no_historico(conteudo, sidechain=False, **extra):
+    d = {"type": "user", "sessionId": "s-esc", "isSidechain": sidechain,
+         "timestamp": _datetime.now(_tz.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+         "message": {"role": "user", "content": conteudo}}
+    d.update(extra)
+    with open(hist, "a") as f:
+        f.write(json.dumps(d) + "\n")
+
+
+INTERROMPIDO = [{"type": "text", "text": "[Request interrupted by user for tool use]"}]
+hook({**ESC, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "t1",
+      "tool_input": {"description": "Apagar a pasta build"}})
+hook({**ESC, "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "x"})
+ok(estado()["modo"] == "chamando", "pedindo permissao: chamando")
+no_historico(INTERROMPIDO, sidechain=True)
+ok(estado()["modo"] == "chamando", "interrupcao num subagente nao conta")
+no_historico([{"type": "tool_result", "tool_use_id": "t0", "content": "[Request interrupted by user for tool use]"}],
+             permissionDecision={"decision": "accept", "source": "config"})
+ok(estado()["modo"] == "chamando", "o texto dentro do resultado de outra ferramenta nao conta")
+no_historico(INTERROMPIDO)
+e = estado()
+ok(e["modo"] == "esperando" and e["ferramenta"] == "", f"Esc no pedido de permissao: esperando ({e['modo']})")
+hook({**ESC, "hook_event_name": "UserPromptSubmit"})
+ok(estado()["modo"] == "cozinhando", "um prompt novo depois do Esc: cozinhando de novo")
+hook({**ESC, "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_use_id": "t2",
+      "tool_input": {"file_path": "/x/esc/a.py"}})
+hook({**ESC, "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "x"})
+no_historico([{"type": "tool_result", "tool_use_id": "t2", "content": "rejected", "is_error": True}],
+             permissionDecision={"decision": "reject", "source": "user_reject"})
+ok(estado()["modo"] == "esperando", "recusa registrada so na decisao de permissao: esperando")
+hook({**ESC, "hook_event_name": "UserPromptSubmit"})
+hook({**ESC, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "t3",
+      "tool_input": {"description": "Rodar os testes"}})
+no_historico("[Request interrupted by user]")
+ok(estado()["modo"] == "esperando", "Esc enquanto trabalha (sem pedido de permissao): esperando")
+os.remove(hist)
+
 print("limite que ja zerou")
 with open(os.path.join(PC, "data", "statusline.json"), "w") as f:
     json.dump({"rate_limits": {"five_hour": {"used_percentage": 87, "resets_at": time.time() - 7200},
@@ -234,6 +312,22 @@ sobras = [n for n in os.listdir(os.path.join(PC, "data")) if n.endswith(".tmp")]
 ok(not sobras, "nenhum arquivo temporario sobrando")
 os.remove(arq_sl)
 
+print("statusLine antiga")
+orig = os.path.join(PC, "data", "orig_statusline.txt")
+entrada = {"model": {"display_name": "Opus"}, "rate_limits": {"five_hour": {"used_percentage": 7, "resets_at": futuro}}}
+for antiga, esperado, msg in [
+        ("echo minha linha", "minha linha", "a sua statusLine continua aparecendo"),
+        ("exit 3", "Opus | 5h 7%", "a antiga falhou: aparece a do Claudinho, nao uma linha vazia"),
+        ("comando-que-nao-existe-claudinho", "Opus | 5h 7%", "comando inexistente: a do Claudinho"),
+        ('[[ -n "$HOME" ]] && echo coisa do bash', "coisa do bash", "roda no bash, como o Claude Code"),
+        ("cat >/dev/null; printf 'acentuação ✓'", "acentuação ✓", "acentos passam intactos")]:
+    with open(orig, "w", encoding="utf-8") as f:
+        f.write(antiga)
+    saida = statusline(entrada)
+    ok(saida == esperado, f"{msg} ({saida!r})")
+os.remove(orig)
+os.remove(arq_sl)
+
 print("arquivos fora do formato")
 for ruim_state, ruim_status in [([1, 2], "x"), ({"sessions": [1], "tools": {"a": 1}}, {"rate_limits": []}),
                                 ({"sessions": {"a": 5, "b": {"status": "working", "last_event": "ontem"}},
@@ -275,6 +369,11 @@ ok("PostToolUseFailure" in st["hooks"], "PostToolUseFailure registrado")
 ok("Replaced 2 Claudinho hook" in r.stdout, "o setup avisa que trocou os antigos")
 ok(not os.path.exists(os.path.join(PC, "data", "orig_statusline.txt")),
    "statusLine antiga do Claudinho (morta) nao vira a 'sua statusLine'")
+r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--no-prompt", "--ip", "127.0.0.1"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+st = json.load(open(settings_path))
+ok("Replaced" not in r.stdout and len(st["hooks"]["Stop"]) == 1,
+   "rodar o setup de novo nao chama os hooks desta pasta de 'antigos' nem repete")
 os.remove(settings_path)
 
 print("setup e servidor")
@@ -336,6 +435,85 @@ r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "remover
                    capture_output=True, text=True, env=env)
 settings = json.load(open(os.path.join(home, ".claude", "settings.json")))
 ok("hooks" not in settings and "statusLine" not in settings, "remover tira tudo")
+
+print("setup: statusLine com opcoes, Windows e PowerShell")
+SETUP = [sys.executable, "-I", os.path.join(PC, "setup.py")]
+json.dump({"statusLine": {"type": "command", "command": "echo minha", "padding": 2, "refreshInterval": 5}},
+          open(settings_path, "w"))
+subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1"], capture_output=True, text=True, env=env,
+               stdin=subprocess.DEVNULL)
+sl = json.load(open(settings_path))["statusLine"]
+ok(sl.get("padding") == 2 and sl.get("refreshInterval") == 5 and "statusline.py" in sl["command"],
+   "a statusLine do Claudinho fica com o padding e o refreshInterval que voce tinha")
+subprocess.run(SETUP + ["remove"], capture_output=True, text=True, env=env)
+sl = json.load(open(settings_path))["statusLine"]
+ok(sl == {"type": "command", "command": "echo minha", "padding": 2, "refreshInterval": 5},
+   f"remover devolve a sua statusLine inteira ({sl})")
+r = subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1", "--shell", "powershell"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+st = json.load(open(settings_path))
+hs = [h for lst in st["hooks"].values() for e in lst for h in e["hooks"]]
+ok(all(h["command"].startswith('& "') and h.get("shell") == "powershell" for h in hs),
+   "--shell powershell: comandos com & e o campo shell")
+ok(st["statusLine"]["command"].startswith('& "'), "--shell powershell: a statusLine tambem")
+r = subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1"], capture_output=True, text=True, env=env,
+                   stdin=subprocess.DEVNULL)
+st = json.load(open(settings_path))
+ok(len(st["hooks"]["Stop"]) == 1 and not st["hooks"]["Stop"][0]["hooks"][0]["command"].startswith("&")
+   and "Replaced" not in r.stdout, "voltando ao bash, os comandos do PowerShell sao trocados, sem repetir")
+r = subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1", "--shell", "zsh"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+ok(r.returncode != 0 and "--shell" in r.stderr, "--shell com valor errado da erro claro")
+subprocess.run(SETUP + ["remove"], capture_output=True, text=True, env=env)
+os.remove(settings_path)
+import setup as _setup  # noqa: E402
+_setup.PY = r"C:\Program Files\Python312\python.exe"
+alvo = r"C:\Users\Joao Silva\kindle-claude2.0\pc\hook.py"
+ok(_setup.comando(alvo, "powershell", "nt") ==
+   '& "C:/Program Files/Python312/python.exe" "C:/Users/Joao Silva/kindle-claude2.0/pc/hook.py" --claudinho',
+   "Windows + PowerShell: & e barras normais")
+ok(_setup.comando(alvo, "bash", "nt") ==
+   '"C:/Program Files/Python312/python.exe" "C:/Users/Joao Silva/kindle-claude2.0/pc/hook.py" --claudinho',
+   "Windows + Git Bash: barras normais, sem &")
+ok(_setup.comando_nosso(_setup.comando(alvo, "powershell", "nt"), "hook.py"), "o comando do PowerShell e reconhecido")
+
+print("setup: token novo, host e CLAUDE_CONFIG_DIR")
+r = subprocess.run(SETUP + ["connection", "--no-prompt", "--ip", "127.0.0.1", "--port", "8799"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+antes = json.load(open(os.path.join(PC, "config.json")))["token"]
+ok(antes == cfg["token"], "sem --new-token o token continua o mesmo")
+r = subprocess.run(SETUP + ["connection", "--no-prompt", "--ip", "127.0.0.1", "--new-token"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+novo = json.load(open(os.path.join(PC, "config.json")))
+ok(novo["token"] != antes and novo["token"] in open(os.path.join(tmp, "kindle", "claudinho.koplugin", "config.lua")).read()
+   and "New token" in r.stdout, "--new-token troca o token no PC e no config.lua")
+novo["host"] = "127.0.0.1"
+json.dump(novo, open(os.path.join(PC, "config.json"), "w"))
+subprocess.run(SETUP + ["connection", "--no-prompt", "--ip", "127.0.0.1", "--port", "8796"],
+               capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+novo = json.load(open(os.path.join(PC, "config.json")))
+ok(novo.get("host") == "127.0.0.1" and novo["porta"] == 8796, "o setup mantem o \"host\" que voce pos no config.json")
+srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py")], env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+time.sleep(1.5)
+try:
+    ok(get("http://127.0.0.1:8796/saude")[0] == 200, "com \"host\", responde nesse endereco")
+finally:
+    srv.terminate()
+    saida = srv.communicate()[0]
+ok("http://127.0.0.1:8796/estado.json" in saida, "e diz esse endereco ao abrir")
+outra = os.path.join(tmp, "outra-config")
+os.makedirs(os.path.join(outra, "projects", "q"))
+with open(os.path.join(outra, "projects", "q", "s.jsonl"), "w") as f:
+    f.write(linha(70, 4321))
+env_outra = dict(env, CLAUDE_CONFIG_DIR=outra)
+r = subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1"], capture_output=True, text=True, env=env_outra,
+                   stdin=subprocess.DEVNULL)
+ok(os.path.exists(os.path.join(outra, "settings.json")) and not os.path.exists(settings_path),
+   "com CLAUDE_CONFIG_DIR, os hooks vao para o settings.json de la")
+out = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--estado"],
+                     capture_output=True, text=True, env=env_outra).stdout
+ok(json.loads(out)["tokens"]["hoje"] == 4000, "e os tokens sao contados nos historicos de la")
 
 shutil.rmtree(tmp)
 print("TUDO CERTO" if not falhas else f"{falhas} FALHA(S)")

@@ -19,8 +19,13 @@ Eventos usados:
 Privacidade: para o Kindle vai so o nome do arquivo, o padrao de busca, o
 dominio de uma URL ou a descricao curta que o Claude da ao comando. De uma
 ferramenta MCP (Linear, Gmail, Notion...) vai so o nome da funcao, porque os
-campos dela costumam ser conteudo seu. O comando em si, prompts e textos de
-busca nao saem daqui.
+campos dela costumam ser conteudo seu; do TaskCreate vai so o titulo (subject),
+nunca o texto da tarefa. O comando em si, prompts e textos de busca nao saem
+daqui.
+
+O caminho do historico da sessao (transcript_path) fica guardado: o Claude Code
+nao avisa os hooks quando voce aperta Esc ou recusa uma permissao, mas o
+historico mostra, e o claudinho.py le dali.
 """
 import json
 import os
@@ -34,12 +39,25 @@ STATE = os.path.join(DATA, "state.json")
 LOCK = os.path.join(DATA, "state.lock")
 MAX_TOOLS = 12
 MAX_DESC = 80
+MAX_RODANDO = 8           # ferramentas em paralelo guardadas por sessao
 FORGET_AFTER = 6 * 3600   # sessoes paradas ha mais que isso saem do arquivo
 
 # notification_type que querem uma resposta sua
 PEDE_VOCE = {"permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input"}
 # palavras que vem antes do programa num comando e nao dizem nada
-PREFIXOS = {"sudo", "env", "time", "nohup", "exec", "command", "nice"}
+PREFIXOS = {"sudo", "doas", "env", "time", "nohup", "exec", "command", "nice"}
+# opcoes desses prefixos que levam um valor: em "sudo -u postgres psql" o programa e o psql
+OPCOES_COM_VALOR = {
+    "sudo": {"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T"},
+    "doas": {"-u", "-C"},
+    "env": {"-u", "-C", "-S"},
+    "nice": {"-n"},
+    "time": {"-f", "-o"},
+}
+# ferramentas cujo "description" e o texto da tarefa (conteudo seu): vai so o titulo
+SO_TITULO = {"TaskCreate", "TaskUpdate"}
+# ferramentas de busca: o padrao diz mais que a pasta onde se busca
+BUSCAS = {"Grep", "Glob"}
 
 
 class FileLock:
@@ -97,15 +115,30 @@ def cortar(texto, n=MAX_DESC):
 
 def programa(cmd):
     """So o nome do programa de um comando ("npm", "git"), sem argumentos."""
-    for parte in cmd.split():
-        parte = parte.strip("'\"(")
+    partes = cmd.split()
+    prefixo = None                               # o ultimo sudo/env/nice... visto
+    i = 0
+    while i < len(partes):
+        parte = partes[i].strip("'\"(")
+        i += 1
         nome, igual, _ = parte.partition("=")
         if igual and nome.isidentifier():        # FOO=bar antes do comando
             continue
-        if parte in PREFIXOS or not parte:
+        if not parte:
+            continue
+        if parte in PREFIXOS:
+            prefixo = parte
+            continue
+        if prefixo and parte.startswith("-"):    # opcao do prefixo: "sudo -u postgres"
+            if parte in OPCOES_COM_VALOR.get(prefixo, ()):
+                i += 1                           # pula o valor da opcao tambem
             continue
         return os.path.basename(parte)
     return ""
+
+
+def primeira_linha(v):
+    return cortar(str(v).split("\n")[0])
 
 
 def short_desc(tool, inp):
@@ -116,14 +149,18 @@ def short_desc(tool, inp):
             return cortar(inp["description"])
         nome = programa(str(inp.get("command") or ""))
         return cortar(nome + " …") if nome else ""
+    if tool in SO_TITULO:
+        return primeira_linha(inp.get("subject") or "")
+    if tool in BUSCAS and inp.get("pattern"):
+        return primeira_linha(inp["pattern"])
     for key in ("file_path", "notebook_path", "path"):
         if inp.get(key):
             return cortar(os.path.basename(str(inp[key]).rstrip("/\\")) or str(inp[key]))
     if inp.get("url"):
         return cortar(urlparse(str(inp["url"])).hostname or "")
-    for key in ("pattern", "description", "subject"):
+    for key in ("pattern", "subject", "description"):
         if inp.get(key):
-            return cortar(str(inp[key]).split("\n")[0])
+            return primeira_linha(inp[key])
     return ""
 
 
@@ -158,6 +195,16 @@ def update(state, event, now):
     cwd = event.get("cwd")
     if isinstance(cwd, str) and cwd:
         s["project"] = os.path.basename(cwd.rstrip("/\\")) or cwd
+    transcript = event.get("transcript_path")
+    if isinstance(transcript, str) and transcript:
+        s["transcript"] = transcript
+
+    # ferramentas rodando agora, pelo tool_use_id: com varias em paralelo (um build
+    # junto com um Read), o fim de uma nao pode dar a sessao como "pensando"
+    rodando = s.get("rodando") if isinstance(s.get("rodando"), dict) else {}
+    rodando = {k: v for k, v in rodando.items() if isinstance(v, dict)}
+    tid = event.get("tool_use_id")
+    tid = tid if isinstance(tid, str) and tid else None
 
     if name == "PreToolUse":
         nome = str(event.get("tool_name") or "?")
@@ -168,23 +215,47 @@ def update(state, event, now):
         else:
             desc = short_desc(nome, event.get("tool_input"))
         s.update(status="working", tool_running=True, tool_name=tool,
-                 tool_desc=desc, tool_started=now)
+                 tool_desc=desc, tool_started=now, tool_id=tid)
+        if tid:
+            rodando[tid] = {"tool": tool, "desc": desc, "t": now}
+            # um PostToolUse perdido nao pode acumular para sempre
+            for k in sorted(rodando, key=lambda k: numero(rodando[k].get("t")))[:-MAX_RODANDO]:
+                del rodando[k]
         tools = state["tools"] if isinstance(state.get("tools"), list) else []
-        tools.append({"name": tool, "desc": desc, "t": now, "session": sid})
+        item = {"name": tool, "desc": desc, "t": now, "session": sid}
+        if tid:
+            item["id"] = tid
+        tools.append(item)
         state["tools"] = tools[-MAX_TOOLS:]
     elif name in ("PostToolUse", "PostToolUseFailure"):
-        s.update(status="working", tool_running=False)
+        if tid:
+            rodando.pop(tid, None)
+        if rodando:
+            # outra ferramenta continua rodando: ela passa a ser a da barra
+            u_id = max(rodando, key=lambda k: numero(rodando[k].get("t")))
+            u = rodando[u_id]
+            s.update(status="working", tool_running=True, tool_name=str(u.get("tool") or ""),
+                     tool_desc=str(u.get("desc") or ""), tool_started=numero(u.get("t")), tool_id=u_id)
+        else:
+            s.update(status="working", tool_running=False)
     elif name == "UserPromptSubmit":
+        rodando = {}
         s.update(status="working", tool_running=False)
     elif name == "Notification":
         s.update(status="waiting", tool_running=False, waiting_since=now)
     elif name in ("Stop", "StopFailure"):
+        rodando = {}
         s.update(status="done", tool_running=False, done_at=now)
     elif name == "SessionEnd":
+        rodando = {}
         s.update(status="closed", tool_running=False)
     else:
         return False
 
+    if rodando:
+        s["rodando"] = rodando
+    else:
+        s.pop("rodando", None)
     s["last_event"] = now
     state["last_event"] = now
     for k in [k for k, v in sessions.items() if not isinstance(v, dict) or now - numero(v.get("last_event")) > FORGET_AFTER]:

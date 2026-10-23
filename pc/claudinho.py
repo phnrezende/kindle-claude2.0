@@ -38,7 +38,15 @@ DATA = os.path.join(BASE, "data")
 STATE = os.path.join(DATA, "state.json")
 STATUS = os.path.join(DATA, "statusline.json")
 CONFIG = os.path.join(BASE, "config.json")
-PROJECTS = os.path.expanduser("~/.claude/projects")
+
+
+def pasta_claude():
+    """Onde o Claude Code guarda configuracao e historicos: ~/.claude, ou a pasta
+    de CLAUDE_CONFIG_DIR quando essa variavel esta definida."""
+    return os.path.abspath(os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"))
+
+
+PROJECTS = os.path.join(pasta_claude(), "projects")
 VERSAO = 2                  # 2: so dados; as frases (e o idioma) ficam no Kindle
 
 PRATO_SECONDS = 60          # quanto tempo o "prato pronto" fica depois de terminar
@@ -97,6 +105,41 @@ def cortar(texto, n):
 _tok_cache = {}
 _tok_result = {"t": 0, "valor": (0, 0, None)}
 
+# session_id -> quando o historico mostrou que a vez do Claude acabou sem aviso aos
+# hooks: Esc (interrupcao) ou um pedido de permissao recusado. O Stop nao dispara
+# nesses casos e, sem isso, o Kindle ficava "Te chamando!" por meia hora.
+_marcas = {}
+INTERROMPIDO = "[Request interrupted by user"     # inicio do texto que o Claude Code grava
+_B_INTERROMPIDO = INTERROMPIDO.encode()
+_B_DECISAO = b'"permissionDecision"'
+
+
+def chave_arquivo(path):
+    """O mesmo historico chega pelo glob e pelo transcript_path do hook: uma chave so."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _quando(d):
+    return datetime.fromisoformat(str(d["timestamp"]).replace("Z", "+00:00")).astimezone()
+
+
+def _parou_sem_hook(d):
+    """Esta linha do historico mostra um Esc ou uma recusa de permissao do usuario?
+    So vale a conversa principal (um subagente tem isSidechain)."""
+    if d.get("type") != "user" or d.get("isSidechain"):
+        return False
+    decisao = d.get("permissionDecision")
+    if isinstance(decisao, dict) and decisao.get("decision") not in (None, "accept", "allow") \
+            and str(decisao.get("source") or "").startswith("user"):
+        return True
+    conteudo = (d.get("message") or {}).get("content") if isinstance(d.get("message"), dict) else None
+    if isinstance(conteudo, str):
+        return conteudo.startswith(INTERROMPIDO)
+    if isinstance(conteudo, list):
+        return any(isinstance(b, dict) and b.get("type") == "text"
+                   and str(b.get("text") or "").startswith(INTERROMPIDO) for b in conteudo)
+    return False
+
 
 def _ler_novas(path, cache, cutoff_dt):
     try:
@@ -116,15 +159,37 @@ def _ler_novas(path, cache, cutoff_dt):
     pos = cache["pos"]
     for bruta in bloco[:fim + 1].split(b"\n"):
         inicio, pos = pos, pos + len(bruta) + 1
-        if b'"usage"' not in bruta:
+        tem_uso = b'"usage"' in bruta
+        # a decisao "accept" aparece em quase todo resultado de ferramenta: nem abre o JSON
+        sinal = _B_INTERROMPIDO in bruta or (
+            _B_DECISAO in bruta and b'"permissionDecision":{"decision":"accept"' not in bruta)
+        if not (tem_uso or sinal):
             continue
         try:
             d = json.loads(bruta.decode("utf-8", errors="ignore"))
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if sinal and isinstance(d.get("sessionId"), str):
+            try:
+                if _parou_sem_hook(d):
+                    t = _quando(d).timestamp()
+                    if t > _marcas.get(d["sessionId"], 0):
+                        _marcas[d["sessionId"]] = t
+            except Exception:
+                pass
+        if not tem_uso:
+            continue
+        try:
             msg = d.get("message") or {}
             usage = msg.get("usage")
-            if not usage:
+            if not isinstance(usage, dict) or not usage:
                 continue
-            dt = datetime.fromisoformat(d["timestamp"].replace("Z", "+00:00")).astimezone()
+            dt = _quando(d)
+            tokens = sum(int(usage.get(k) or 0) for k in (
+                "input_tokens", "output_tokens",
+                "cache_creation_input_tokens", "cache_read_input_tokens"))
         except Exception:
             continue
         if dt < cutoff_dt:
@@ -132,11 +197,26 @@ def _ler_novas(path, cache, cutoff_dt):
         key = f'{msg.get("id")}|{d.get("requestId")}'
         if key == "None|None":
             key = f"{path}:{inicio}"
-        tokens = sum(int(usage.get(k) or 0) for k in (
-            "input_tokens", "output_tokens",
-            "cache_creation_input_tokens", "cache_read_input_tokens"))
         cache["entries"][key] = (dt, tokens)
     cache["pos"] += fim + 1
+
+
+def ler_historicos(sessions):
+    """Le o pedaco novo do historico das sessoes trabalhando ou esperando (o
+    transcript_path que o hook guardou), para ver logo um Esc ou uma recusa.
+    Usa o mesmo cache da contagem de tokens, entao nada e lido duas vezes."""
+    cutoff_dt = datetime.now().astimezone() - timedelta(days=8)
+    for s in sessions.values():
+        if not isinstance(s, dict) or s.get("status") not in ("working", "waiting"):
+            continue
+        path = s.get("transcript")
+        if not isinstance(path, str) or not path.endswith(".jsonl"):
+            continue
+        cache = _tok_cache.setdefault(chave_arquivo(path), {"pos": 0, "entries": {}})
+        try:
+            _ler_novas(path, cache, cutoff_dt)
+        except Exception:
+            pass
 
 
 def token_stats():
@@ -154,8 +234,9 @@ def token_stats():
                 continue
         except OSError:
             continue
-        vistos.add(path)
-        cache = _tok_cache.setdefault(path, {"pos": 0, "entries": {}})
+        chave = chave_arquivo(path)
+        vistos.add(chave)
+        cache = _tok_cache.setdefault(chave, {"pos": 0, "entries": {}})
         _ler_novas(path, cache, cutoff_dt)
         # mensagens com mais de 8 dias nao entram em nenhuma conta
         velhas = [k for k, (dt, _) in cache["entries"].items() if dt < cutoff_dt]
@@ -187,10 +268,17 @@ def token_stats_cached(now):
 
 # ------------------------------------------------------------------ sessoes
 
-def session_view(s, now):
-    """(prioridade, modo, desde, ferramenta, descricao) de uma sessao."""
+def session_view(s, now, parou=None):
+    """(prioridade, modo, desde, ferramenta, descricao) de uma sessao.
+
+    `parou`: quando o historico da sessao mostrou um Esc ou uma permissao recusada
+    (ver _marcas). Nesses casos o Claude Code nao avisa os hooks."""
     last = num(s.get("last_event"))
     status = s.get("status")
+    parou = num(parou)
+    if status in ("waiting", "working") and parou > last:
+        # a vez do Claude acabou depois do ultimo evento: ele espera voce
+        return 1, "esperando", parou, "", ""
     if status == "waiting":
         since = num(s.get("waiting_since"), last) or last
         asked_tool = now - num(s.get("tool_started")) < 120
@@ -214,23 +302,26 @@ def session_view(s, now):
     return 0, "descansando", last, "", ""
 
 
-def derive(state, now):
-    """Junta todas as sessoes numa so: mostra a mais urgente e conta as ativas."""
+def derive(state, now, marcas=None):
+    """Junta todas as sessoes numa so: mostra a mais urgente e conta as ativas.
+    `marcas`: session_id -> quando o historico mostrou um Esc ou uma recusa."""
+    marcas = marcas if isinstance(marcas, dict) else {}
     sessions = state.get("sessions") if isinstance(state.get("sessions"), dict) else {}
     sessions = {sid: s for sid, s in sessions.items() if isinstance(s, dict)}
     live = [(sid, s) for sid, s in sessions.items()
             if s.get("status") != "closed" and now - num(s.get("last_event")) < REST_AFTER]
-    views = [(session_view(s, now), sid, s) for sid, s in live]
+    views = [(session_view(s, now, marcas.get(sid)), sid, s) for sid, s in live]
     active = sum(1 for v, _, _ in views if v[0] >= 3)
     if not views:
         last = max([num(s.get("last_event")) for s in sessions.values()] or
                    [num(state.get("last_event"))])
         return {"mode": "descansando", "since": last, "tool": "", "desc": "",
-                "active": 0, "project": "", "session": None}
+                "active": 0, "project": "", "session": None, "tool_id": None}
     (_, mode, since, tool, desc), sid, s = max(
         views, key=lambda v: (v[0][0], num(v[2].get("last_event"))))
     return {"mode": mode, "since": since, "tool": tool, "desc": desc,
-            "active": active, "project": s.get("project", ""), "session": sid}
+            "active": active, "project": s.get("project", ""), "session": sid,
+            "tool_id": s.get("tool_id") if tool else None}
 
 
 def demo(mode):
@@ -294,6 +385,14 @@ def ferramentas_antes(tools, info):
     aparece. Com varias sessoes, ela nem sempre e a ultima da lista."""
     if not info["tool"] or not tools:
         return tools
+    tid = info.get("tool_id")
+    if tid:
+        # com ferramentas em paralelo, a da barra nem sempre e a ultima da sessao
+        for i in range(len(tools) - 1, -1, -1):
+            if tools[i].get("id") == tid:
+                return tools[:i] + tools[i + 1:]
+        if any("id" in t for t in tools):
+            return tools           # a ferramenta da barra ja saiu da lista
     for i in range(len(tools) - 1, -1, -1):
         if tools[i].get("session") == info.get("session"):
             return tools[:i] + tools[i + 1:]
@@ -313,6 +412,7 @@ def como_kindle(n):
 
 def montar_estado(now=None, demo_mode=None):
     now = now or time.time()
+    marcas = None
     if demo_mode:
         state, status, (hoje, hora, media) = demo(demo_mode)
     else:
@@ -320,7 +420,12 @@ def montar_estado(now=None, demo_mode=None):
         hoje, hora, media = token_stats_cached(now)
     state = state if isinstance(state, dict) else {}
     status = status if isinstance(status, dict) else {}
-    info = derive(state, now)
+    if not demo_mode:
+        sessoes = state.get("sessions")
+        if isinstance(sessoes, dict):
+            ler_historicos(sessoes)
+        marcas = _marcas
+    info = derive(state, now, marcas)
 
     tools = state.get("tools") if isinstance(state.get("tools"), list) else []
     tools = [t for t in tools if isinstance(t, dict)]
@@ -449,9 +554,15 @@ def rodar(cfg, demo_mode):
     Servidor.token = cfg.get("token") or ""
     Servidor.demo = demo_mode
     porta = int(cfg.get("porta") or 8787)
+    # "host" no config.json limita a uma interface (o IP da rede de casa, por exemplo);
+    # sem ele, responde em todas, como antes
+    host = str(cfg.get("host") or "0.0.0.0")
     try:
-        srv = ThreadingHTTPServer(("0.0.0.0", porta), Handler)
+        srv = ThreadingHTTPServer((host, porta), Handler)
     except OSError as e:
+        if host != "0.0.0.0":
+            sys.exit(f"Could not listen on {host}:{porta} ({e}). Is this computer still on that network"
+                     " with that IP? Fix \"host\" in config.json or remove it to listen everywhere.")
         sys.exit(f"Could not open port {porta} ({e}). Is another claudinho.py already running?"
                  " Use --port to pick another one.")
     if not demo_mode:
@@ -459,7 +570,7 @@ def rodar(cfg, demo_mode):
         # feita aqui, ela nao atrasa a primeira resposta ao Kindle
         log("Counting tokens in the Claude Code history…")
         token_stats_cached(time.time())
-    log(f"The Kindle reads http://{ip_local()}:{porta}/estado.json")
+    log(f"The Kindle reads http://{ip_local() if host == '0.0.0.0' else host}:{porta}/estado.json")
     if not Servidor.token:
         log("Warning: no token. Any device on the network can read the state. Run setup.py.")
     if demo_mode:
