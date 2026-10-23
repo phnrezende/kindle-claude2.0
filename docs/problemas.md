@@ -21,7 +21,9 @@ curl -H "Authorization: Bearer SEU_TOKEN" http://localhost:8787/estado.json
 | "sem resposta" / "tempo esgotado" | IP do PC mudou, firewall, ou agente parado | confira o IP (`python3 pc/setup.py connection`), libere a porta 8787 no firewall, deixe o `claudinho.py` rodando |
 | "Wi-Fi desligado" | o Kindle está sem rede | ligue o Wi-Fi no KOReader |
 | Sempre "Fogão desligado" | os hooks não estão chegando | reinicie as sessões do Claude Code abertas antes do setup; confira `pc/data/state.json` |
-| "--" no % da sessão e da semana, no painel (0% na linha do topo) | plano sem `rate_limits`, ou ainda sem resposta na sessão | aparece depois da primeira resposta, nos planos Pro/Max |
+| "--" no % da sessão e da semana, no painel (0% na linha do topo) | sem o uso da conta (o agente avisa ao abrir: "No usage from your Claude account…") e sem a statusLine | faça login no `claude` do terminal (`claude`, depois `/login`): com ele, o agente lê o uso da conta mesmo que você use só o app de desktop. Ou use o `claude` do terminal, que alimenta a statusLine depois da primeira resposta. Só planos Pro/Max têm esse % |
+| O agente avisa "Renewed the Claude Code login token" | o token do `claude` venceu (dura umas 8 h) e o agente renovou | é normal; o arquivo de antes fica em `~/.claude/.credentials.json.bak-claudinho` |
+| O `claude` do terminal pede login de novo | a renovação deu errado no meio, ou o refresh token venceu | `/login` no `claude`. Para o agente não renovar mais, ponha `"uso_da_conta": false` no `pc/config.json` |
 | "--" na linha do topo, sem bolinha cheia | sem sinal do PC | veja as linhas de "sem resposta" acima |
 | Painel em inglês (ou em português) sem querer | o idioma segue o do KOReader | Claudinho → Idioma (*Language*) e escolha o idioma |
 | A linha do topo cobre o começo da página | é um PDF (página fixa, sem margem para aumentar) | desligue em Claudinho → Mostrar o status no topo da página |

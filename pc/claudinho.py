@@ -2,8 +2,9 @@
 """Claudinho agent (runs on the computer).
 
 Gathers what the Claude Code hooks and statusLine saved, plus the token counts
-from the session logs, into a small JSON (the "state") and serves it to the
-Kindle on your home network at http://<ip>:<port>/estado.json.
+from the session logs and the usage limits of your Claude account (the same as
+/usage), into a small JSON (the "state") and serves it to the Kindle on your
+home network at http://<ip>:<port>/estado.json.
 
     python3 claudinho.py                 run with config.json
     python3 claudinho.py --demo MODE     fake data (test without Claude Code)
@@ -25,10 +26,14 @@ import hmac
 import json
 import math
 import os
+import re
+import shutil
 import socket
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -63,8 +68,11 @@ MAX_DESCRICAO = 80
 MAX_PROJETO = 40
 
 
+LOG_STDERR = False          # com --state, o stdout fica so com o JSON
+
+
 def log(*args):
-    print(time.strftime("%H:%M:%S"), *args, flush=True)
+    print(time.strftime("%H:%M:%S"), *args, flush=True, file=sys.stderr if LOG_STDERR else sys.stdout)
 
 
 def read_json(path):
@@ -266,6 +274,187 @@ def token_stats_cached(now):
     return _tok_result["valor"]
 
 
+# ------------------------------------------------------------------ uso da conta
+
+# O % da sessao de 5 h e da semana, direto da conta, como o /usage do Claude Code.
+# A statusLine so roda no `claude` do terminal; o app de desktop nao a chama, entao
+# quem usa o app ficaria sem o %. O login e o do `claude` do terminal
+# (.credentials.json). O token de acesso dura poucas horas e so o `claude` o renova;
+# vencido, o agente renova do mesmo jeito e grava o novo no arquivo, porque cada
+# renovacao troca tambem o refresh token: sem gravar, o `claude` perderia o login.
+CREDENCIAIS = os.path.join(pasta_claude(), ".credentials.json")
+USO_URL = os.environ.get("CLAUDINHO_USO_URL") or "https://api.anthropic.com/api/oauth/usage"
+TOKEN_URL = os.environ.get("CLAUDINHO_TOKEN_URL") or "https://platform.claude.com/v1/oauth/token"
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"      # o do Claude Code
+USO_A_CADA = 120            # segundos entre consultas
+USO_ESPERA_FALHA = 600      # depois de uma falha (sem rede, endpoint fora)
+USO_ESPERA_LOGIN = 1800     # sem login, ou login que nao renova: tenta de vez em quando
+USO_LIGADO = True           # "uso_da_conta": false no config.json desliga
+
+_uso = {"valor": None, "avisos": set()}
+_credenciais_lock = threading.Lock()
+
+
+class SemLogin(Exception):
+    """Nao ha login do Claude Code, ou ele nao pode ser renovado."""
+
+
+def _avisar_uso(chave, msg):
+    if chave not in _uso["avisos"]:
+        _uso["avisos"].add(chave)
+        log(msg)
+
+
+def _http_json(metodo, url, corpo=None, token=None):
+    headers = {"Content-Type": "application/json", "User-Agent": "claudinho-kindle"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+        headers["anthropic-beta"] = "oauth-2025-04-20"
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = urllib.request.Request(url, data=dados, headers=headers, method=metodo)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _ler_credenciais():
+    """(o arquivo inteiro, a parte claudeAiOauth) ou (None, None)."""
+    try:
+        with open(CREDENCIAIS, encoding="utf-8") as f:
+            dados = json.load(f)
+    except Exception:
+        return None, None
+    oauth = dados.get("claudeAiOauth") if isinstance(dados, dict) else None
+    if not isinstance(oauth, dict) or not oauth.get("accessToken"):
+        return None, None
+    return dados, oauth
+
+
+def _gravar_credenciais(dados):
+    """Grava o .credentials.json de uma vez (arquivo temporario + troca), com as
+    permissoes do original, depois de copiar o atual para .bak-claudinho."""
+    backup = CREDENCIAIS + ".bak-claudinho"
+    shutil.copy2(CREDENCIAIS, backup)
+    tmp = CREDENCIAIS + ".tmp-claudinho"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(dados, f)
+        shutil.copymode(CREDENCIAIS, tmp)
+        os.replace(tmp, CREDENCIAIS)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def renovar_token(oauth):
+    """Pede um token novo com o refresh token, como o Claude Code faz, e grava no
+    .credentials.json so a parte claudeAiOauth (o resto do arquivo fica igual)."""
+    with _credenciais_lock:
+        dados, atual = _ler_credenciais()
+        if not atual or not atual.get("refreshToken"):
+            raise SemLogin("no refresh token")
+        if atual.get("accessToken") != oauth.get("accessToken") and num(atual.get("expiresAt")) / 1000 > time.time() + 60:
+            return atual                  # o `claude` renovou enquanto isso
+        corpo = {"grant_type": "refresh_token", "refresh_token": atual["refreshToken"], "client_id": CLIENT_ID}
+        if isinstance(atual.get("scopes"), list) and atual["scopes"]:
+            corpo["scope"] = " ".join(str(s) for s in atual["scopes"])
+        try:
+            r = _http_json("POST", TOKEN_URL, corpo)
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 401, 403):
+                raise SemLogin(f"HTTP {e.code}")
+            raise
+        if not isinstance(r, dict) or not r.get("access_token") or not r.get("expires_in"):
+            raise ValueError("unexpected token response")
+        agora_ms = int(time.time() * 1000)
+        novo = dict(atual)
+        novo["accessToken"] = r["access_token"]
+        novo["refreshToken"] = r.get("refresh_token") or atual["refreshToken"]
+        novo["expiresAt"] = agora_ms + int(r["expires_in"]) * 1000
+        if r.get("refresh_token_expires_in"):
+            novo["refreshTokenExpiresAt"] = agora_ms + int(r["refresh_token_expires_in"]) * 1000
+        if isinstance(r.get("scope"), str) and r["scope"].strip():
+            novo["scopes"] = r["scope"].split()
+        dados["claudeAiOauth"] = novo
+        _gravar_credenciais(dados)
+    log("Renewed the Claude Code login token (saved in .credentials.json; the old file is in"
+        " .credentials.json.bak-claudinho).")
+    return novo
+
+
+def _epoch(v):
+    """resets_at como numero (epoch) ou texto ISO ("2026-10-23T21:30:00.123+00:00")."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if not isinstance(v, str) or not v:
+        return None
+    s = re.sub(r"(\.\d+)", "", v.strip()).replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
+def _converter_uso(r):
+    """A resposta do /api/oauth/usage no formato do statusline.json."""
+    rl = {}
+    for janela in ("five_hour", "seven_day"):
+        d = r.get(janela) if isinstance(r, dict) else None
+        pct = num(d.get("utilization"), None) if isinstance(d, dict) else None
+        if pct is not None:
+            rl[janela] = {"used_percentage": pct, "resets_at": _epoch(d.get("resets_at"))}
+    return rl
+
+
+def consultar_uso():
+    """O uso da conta agora, no formato do statusline.json. SemLogin sem o login do
+    `claude` no .credentials.json (ou com um que nao renova)."""
+    dados, oauth = _ler_credenciais()
+    if not oauth:
+        raise SemLogin("no .credentials.json")
+    if num(oauth.get("expiresAt")) / 1000 < time.time() + 60:
+        oauth = renovar_token(oauth)
+    try:
+        r = _http_json("GET", USO_URL, token=oauth["accessToken"])
+    except urllib.error.HTTPError as e:
+        if e.code != 401:
+            raise
+        oauth = renovar_token(oauth)      # vencido antes da hora: renova e tenta de novo
+        r = _http_json("GET", USO_URL, token=oauth["accessToken"])
+    return _converter_uso(r)
+
+
+def atualizar_uso():
+    """Consulta o uso uma vez e guarda. Devolve quantos segundos esperar ate a proxima."""
+    try:
+        valor = consultar_uso()
+    except SemLogin as e:
+        _avisar_uso("login:" + str(e), "No usage from your Claude account: the `claude` login in"
+                    f" {CREDENCIAIS} is missing or can't be renewed ({e}). Run `claude` and /login,"
+                    " or the % comes only from the statusLine.")
+        return USO_ESPERA_LOGIN
+    except urllib.error.HTTPError as e:
+        _avisar_uso(f"http:{e.code}", f"Couldn't read the usage of your Claude account (HTTP {e.code}).")
+        return USO_ESPERA_FALHA
+    except Exception as e:
+        _avisar_uso("erro:" + type(e).__name__, f"Couldn't read the usage of your Claude account ({e!r}).")
+        return USO_ESPERA_FALHA
+    if valor and _uso["valor"] is None:
+        partes = [f"{'5 h' if k == 'five_hour' else 'week'} {round(v['used_percentage'])}%" for k, v in valor.items()]
+        log("Usage from your Claude account: " + ", ".join(partes) + ".")
+    _uso["valor"] = valor or None
+    _uso["avisos"].clear()                  # voltou: avisa de novo na proxima falha
+    return USO_A_CADA
+
+
+def acompanhar_uso():
+    while True:
+        time.sleep(atualizar_uso())
+
+
 # ------------------------------------------------------------------ sessoes
 
 def session_view(s, now, parou=None):
@@ -433,6 +622,8 @@ def montar_estado(now=None, demo_mode=None):
              for t in reversed(ferramentas_antes(tools, info)[-4:])]
 
     rl = status.get("rate_limits") if isinstance(status.get("rate_limits"), dict) else {}
+    if not demo_mode and _uso["valor"]:
+        rl = {**rl, **_uso["valor"]}        # o da conta vale mais: atualiza mesmo sem a statusLine
 
     def limite(key, week):
         d = rl.get(key)
@@ -570,6 +761,8 @@ def rodar(cfg, demo_mode):
         # feita aqui, ela nao atrasa a primeira resposta ao Kindle
         log("Counting tokens in the Claude Code history…")
         token_stats_cached(time.time())
+        if USO_LIGADO:
+            threading.Thread(target=acompanhar_uso, daemon=True).start()
     log(f"The Kindle reads http://{ip_local() if host == '0.0.0.0' else host}:{porta}/estado.json")
     if not Servidor.token:
         log("Warning: no token. Any device on the network can read the state. Run setup.py.")
@@ -603,10 +796,15 @@ def main():
         demo_mode = valor or "chamando"
         if demo_mode not in DEMOS:
             sys.exit(f"Unknown demo. Use one of: {', '.join(DEMOS)}")
+    cfg = load_config()
+    global USO_LIGADO, LOG_STDERR
+    USO_LIGADO = cfg.get("uso_da_conta") is not False
     if "--state" in args or "--estado" in args:
+        LOG_STDERR = True
+        if USO_LIGADO and not demo_mode:
+            atualizar_uso()
         print(json.dumps(montar_estado(demo_mode=demo_mode), ensure_ascii=False, indent=2))
         return
-    cfg = load_config()
     tem, porta = opcao(args, "--port", "--porta")
     if tem:
         if not porta or not porta.isdigit() or not 0 < int(porta) < 65536:

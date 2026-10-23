@@ -520,6 +520,129 @@ out = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "-
                      capture_output=True, text=True, env=env_outra).stdout
 ok(json.loads(out)["tokens"]["hoje"] == 4000, "e os tokens sao contados nos historicos de la")
 
+print("uso da conta (o mesmo do /usage), com o login do `claude`")
+import http.server
+import threading
+from datetime import datetime as _dt, timedelta, timezone
+
+
+class Anthropic(http.server.BaseHTTPRequestHandler):
+    """O /api/oauth/usage e o /v1/oauth/token de mentira."""
+    valido, refresh, uso, pedidos = None, None, None, []
+
+    def log_message(self, *a):
+        pass
+
+    def responder(self, codigo, obj):
+        corpo = json.dumps(obj).encode()
+        self.send_response(codigo)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def do_GET(self):
+        Anthropic.pedidos.append(("GET", self.headers.get("anthropic-beta")))
+        if self.headers.get("Authorization") != f"Bearer {Anthropic.valido}":
+            return self.responder(401, {"error": {"type": "authentication_error"}})
+        self.responder(200, Anthropic.uso)
+
+    def do_POST(self):
+        corpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Anthropic.pedidos.append(("POST", corpo))
+        if corpo.get("refresh_token") != Anthropic.refresh:
+            return self.responder(400, {"error": "invalid_grant"})
+        Anthropic.valido, Anthropic.refresh = "acesso-novo", "refresh-novo"
+        self.responder(200, {"access_token": "acesso-novo", "refresh_token": "refresh-novo", "expires_in": 28800,
+                             "scope": "user:inference user:profile"})
+
+
+falso = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Anthropic)
+threading.Thread(target=falso.serve_forever, daemon=True).start()
+base_falsa = f"http://127.0.0.1:{falso.server_port}"
+env_uso = dict(env, CLAUDINHO_USO_URL=base_falsa + "/api/oauth/usage",
+               CLAUDINHO_TOKEN_URL=base_falsa + "/v1/oauth/token")
+cred = os.path.join(home, ".claude", ".credentials.json")
+zera5 = _dt.now(timezone.utc).replace(microsecond=123456) + timedelta(hours=2)
+Anthropic.uso = {"five_hour": {"utilization": 19.0, "resets_at": zera5.isoformat()},
+                 "seven_day": {"utilization": 45.4, "resets_at": (zera5 + timedelta(days=3)).isoformat()},
+                 "seven_day_opus": None}
+
+
+def credenciais(acesso, vence_em, refresh="refresh-velho"):
+    json.dump({"claudeAiOauth": {"accessToken": acesso, "refreshToken": refresh,
+                                 "expiresAt": int((time.time() + vence_em) * 1000),
+                                 "scopes": ["user:inference", "user:profile"], "subscriptionType": "pro"},
+               "mcpOAuth": {"plugin:x": {"accessToken": "nao-mexer"}}}, open(cred, "w"))
+    if os.name != "nt":
+        os.chmod(cred, 0o600)
+    Anthropic.pedidos = []
+
+
+def estado_uso():
+    r = subprocess.run([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--estado"],
+                       capture_output=True, text=True, env=env_uso)
+    return json.loads(r.stdout), r.stderr
+
+
+limpar()
+credenciais("acesso-ok", 3600)
+Anthropic.valido, Anthropic.refresh = "acesso-ok", "refresh-velho"
+e, _ = estado_uso()
+ok(e["sessao"]["pct"] == 19 and e["semana"]["pct"] == 45, f"o % vem da conta, sem statusLine ({e['sessao']}, {e['semana']})")
+ok(e["sessao"].get("hora") == _dt.fromtimestamp(int(zera5.timestamp())).strftime("%H:%M"),
+   "e a hora em que zera, no fuso do PC")
+ok(Anthropic.pedidos == [("GET", "oauth-2025-04-20")], "token valido: so consulta, nao renova")
+ok(json.load(open(cred))["claudeAiOauth"]["accessToken"] == "acesso-ok", "token valido: o arquivo fica igual")
+
+credenciais("acesso-velho", -3600)
+Anthropic.valido, Anthropic.refresh = None, "refresh-velho"
+e, _ = estado_uso()
+c = json.load(open(cred))
+post = [p[1] for p in Anthropic.pedidos if p[0] == "POST"]
+ok(e["sessao"]["pct"] == 19, "token vencido: renova e le o uso")
+ok(post and post[0] == {"grant_type": "refresh_token", "refresh_token": "refresh-velho",
+                        "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e", "scope": "user:inference user:profile"},
+   "renova como o Claude Code (refresh token, client_id e escopos)")
+o = c["claudeAiOauth"]
+ok(o["accessToken"] == "acesso-novo" and o["refreshToken"] == "refresh-novo"
+   and abs(o["expiresAt"] / 1000 - (time.time() + 28800)) < 60, "grava o token novo, o refresh novo e o vencimento")
+ok(o["subscriptionType"] == "pro" and c["mcpOAuth"] == {"plugin:x": {"accessToken": "nao-mexer"}},
+   "o resto do arquivo fica igual")
+ok(json.load(open(cred + ".bak-claudinho"))["claudeAiOauth"]["accessToken"] == "acesso-velho",
+   "backup do arquivo de antes")
+ok(not os.path.exists(cred + ".tmp-claudinho"), "nenhum arquivo temporario sobrando")
+if os.name != "nt":
+    ok(os.stat(cred).st_mode & 0o777 == 0o600, "o arquivo continua so seu (600)")
+
+credenciais("acesso-revogado", 3600)
+Anthropic.valido, Anthropic.refresh = None, "refresh-velho"
+e, _ = estado_uso()
+ok(e["sessao"]["pct"] == 19 and [p[0] for p in Anthropic.pedidos] == ["GET", "POST", "GET"],
+   "token recusado antes de vencer: renova e tenta de novo")
+
+os.makedirs(os.path.join(PC, "data"), exist_ok=True)
+json.dump({"rate_limits": {"five_hour": {"used_percentage": 7, "resets_at": time.time() + 3600}}}, open(arq_sl, "w"))
+credenciais("acesso-velho", -60, refresh="refresh-errado")
+Anthropic.valido, Anthropic.refresh = None, "refresh-velho"
+e, erro = estado_uso()
+ok(e["sessao"]["pct"] == 7 and "/login" in erro, "renovacao recusada: usa a statusLine e diz para fazer /login")
+ok(json.load(open(cred))["claudeAiOauth"]["accessToken"] == "acesso-velho", "renovacao recusada: nao mexe no arquivo")
+
+os.remove(cred)
+Anthropic.pedidos = []
+e, _ = estado_uso()
+ok(e["sessao"]["pct"] == 7 and Anthropic.pedidos == [], "sem login do `claude`: so a statusLine, sem consultar nada")
+
+credenciais("acesso-ok", 3600)
+Anthropic.valido = "acesso-ok"
+cfg_antes = open(os.path.join(PC, "config.json")).read()
+json.dump(dict(json.loads(cfg_antes), uso_da_conta=False), open(os.path.join(PC, "config.json"), "w"))
+e, _ = estado_uso()
+ok(e["sessao"]["pct"] == 7 and Anthropic.pedidos == [], "\"uso_da_conta\": false no config.json desliga")
+open(os.path.join(PC, "config.json"), "w").write(cfg_antes)
+falso.shutdown()
+
 shutil.rmtree(tmp)
 print("TUDO CERTO" if not falhas else f"{falhas} FALHA(S)")
 sys.exit(1 if falhas else 0)

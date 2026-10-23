@@ -8,7 +8,8 @@ Igual ao [kindle-claude](https://github.com/guithepc/kindle-claude), de onde vem
 - Cada ferramenta é acompanhada pelo `tool_use_id`. Com várias em paralelo (um build longo junto com um Read), o fim de uma não faz a sessão parecer "pensando": a que continua rodando passa para a barra.
 - Do `Notification`, só contam os avisos em que o Claude espera uma resposta sua: pedido de permissão e perguntas (`permission_prompt`, `elicitation_dialog`…). O aviso de "parado há 60 s" (`idle_prompt`) e os outros são ignorados, para o Kindle não ficar "Te chamando!" depois de cada resposta.
 - O hook também guarda o caminho do histórico da sessão (`transcript_path`). Quando você aperta Esc ou recusa uma permissão, nenhum hook dispara, mas o Claude Code grava no histórico a interrupção (`[Request interrupted by user…]`) ou a decisão de permissão. O agente lê o pedaço novo desses históricos a cada resposta ao Kindle e passa a sessão para "esperando você". Só vale a conversa principal: o histórico de um subagente não conta.
-- **statusLine** (`pc/statusline.py`): guarda `rate_limits.five_hour` e `rate_limits.seven_day` em `pc/data/statusline.json`, e continua mostrando a statusLine que você já tinha. Ela roda no mesmo shell que o Claude Code usaria (bash; no Windows, Git Bash ou PowerShell). Se ela falhar ou não imprimir nada, aparece a linha do Claudinho, em vez de uma linha vazia.
+- **Uso da conta** (`pc/claudinho.py`): a cada 2 minutos, numa thread à parte (a resposta ao Kindle nunca espera a rede), o agente pede o uso da sessão de 5 h e da semana ao mesmo endpoint do `/usage` do Claude Code (`api.anthropic.com/api/oauth/usage`), com o login do `claude` do terminal, em `~/.claude/.credentials.json`. Funciona mesmo usando só o app de desktop, que não roda a statusLine. Detalhes em [Uso da conta](#uso-da-conta).
+- **statusLine** (`pc/statusline.py`), a reserva: guarda `rate_limits.five_hour` e `rate_limits.seven_day` em `pc/data/statusline.json`, e continua mostrando a statusLine que você já tinha. O uso da conta, quando há, vale mais que ela. Ela roda no mesmo shell que o Claude Code usaria (bash; no Windows, Git Bash ou PowerShell). Se ela falhar ou não imprimir nada, aparece a linha do Claudinho, em vez de uma linha vazia.
 - **Tokens**: o agente soma `input + output + cache_creation + cache_read` dos históricos em `~/.claude/projects/**/*.jsonl` (ou na pasta de `CLAUDE_CONFIG_DIR`), sem contar duas vezes a mesma mensagem, a cada 30 s no máximo. Cada arquivo é lido só a partir de onde parou da última vez.
 
 ## O estado
@@ -29,7 +30,7 @@ O agente (`pc/claudinho.py`) junta as sessões, escolhe a mais urgente (pedindo 
 
 O estado leva só dados, nenhuma frase pronta (versão 2 do formato). As frases ("Cozinhando…", "pensando…", "zera às 15:00") são montadas no Kindle, no idioma escolhido, por `claudinho/textos.lua`. Por isso trocar o idioma não depende do PC. Um agente antigo (versão 1, que mandava as frases em português) continua funcionando.
 
-Se o horário de reset de um limite já passou, o agente manda 0%. O `statusline.json` só muda com o Claude Code aberto, e sem essa regra o Kindle continuaria mostrando o uso da janela que já terminou.
+Se o horário de reset de um limite já passou, o agente manda 0%. O `statusline.json` só muda com o Claude Code aberto (e o uso da conta pode estar sem rede), e sem essa regra o Kindle continuaria mostrando o uso da janela que já terminou.
 
 O `rev` ignora o `agora` e arredonda os números para a precisão que o painel mostra (`2,5 mi`, `32 mil`). Assim, o Kindle só redesenha quando a tela realmente mudaria.
 
@@ -37,9 +38,25 @@ Uma sessão "trabalhando" sem nenhum evento há mais de 10 minutos passa a conta
 
 Depois que você aprova um pedido de permissão, o Kindle continua em "Te chamando!" até a ferramenta terminar: o Claude Code não avisa os hooks quando a permissão é dada, só quando a ferramenta acaba. Com ferramentas rápidas isso nem aparece; com um build longo, sim. Se você recusa (ou aperta Esc), o histórico mostra na hora, e o Kindle sai do "Te chamando!" na busca seguinte.
 
+## Uso da conta
+
+O token de acesso do `claude` dura umas 8 horas, e só o `claude` do terminal o renova. Quem usa o app de desktop fica com ele vencido quase sempre. Por isso, quando ele vence (ou o endpoint responde 401), o agente renova do mesmo jeito que o Claude Code:
+
+- `POST https://platform.claude.com/v1/oauth/token` com `grant_type=refresh_token`, o refresh token, o `client_id` do Claude Code e os mesmos escopos;
+- grava o token novo, o refresh token novo e os vencimentos no `.credentials.json`. Gravar é obrigatório: cada renovação troca também o refresh token, e sem gravar o `claude` do terminal ficaria com um que não vale mais;
+- muda só a parte `claudeAiOauth`, o resto do arquivo (o login dos plugins MCP, por exemplo) fica igual;
+- antes, copia o arquivo para `.credentials.json.bak-claudinho`; grava num arquivo temporário e troca de uma vez, com as permissões do original (600 no Linux e no macOS);
+- relê o arquivo antes de renovar: se o `claude` renovou nesse meio-tempo, usa o token dele.
+
+Se a renovação for recusada (refresh token vencido ou revogado), o agente avisa uma vez para rodar `claude` e `/login`, e o % volta a vir da statusLine. Sem rede, tenta de novo em 10 minutos, mantendo o último valor; um limite que já zerou vira 0% (regra acima).
+
+O endpoint é interno (o mesmo que o Claude Code usa), não documentado, e pode mudar. Para não usar: `"uso_da_conta": false` no `pc/config.json`. No macOS, o Claude Code guarda o login no Keychain, não no arquivo: aí o % vem só da statusLine.
+
 ## O que sai do PC
 
-O estado é um JSON pequeno, assim:
+Para a Anthropic, só o que o Claude Code já manda: o pedido de uso (`api.anthropic.com`) e a renovação do login (`platform.claude.com`), com o seu token. Nada do estado nem dos históricos.
+
+Para o Kindle, o estado é um JSON pequeno, assim:
 
 ```json
 {"v":2,"modo":"cozinhando","desde":1792715237,"ferramenta":"Edit",

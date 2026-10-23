@@ -61,11 +61,12 @@ O assistente e o agente no computador falam sempre em inglês.
 flowchart LR
   A[Claude Code<br/>hooks + statusLine] --> B[pc/data/*.json]
   H[~/.claude/projects<br/>históricos] --> C
+  U[sua conta Claude<br/>uso, como o /usage] --> C
   B --> C[pc/claudinho.py<br/>monta o estado]
   C -->|HTTP na Wi-Fi de casa| K[Kindle<br/>plugin do KOReader]
 ```
 
-1. Os **hooks** do Claude Code gravam o que cada sessão está fazendo; a **statusLine** guarda o % de uso.
+1. Os **hooks** do Claude Code gravam o que cada sessão está fazendo. O % de uso vem da sua conta, o mesmo que o `/usage` mostra, com o login do `claude`; a **statusLine** fica de reserva.
 2. O **agente** (`pc/claudinho.py`) junta tudo num JSON pequeno, o "estado".
 3. O agente responde na rede de casa. Kindle e PC precisam estar na mesma Wi-Fi.
 4. O **plugin** busca o estado a cada 60 s lendo (30 s com o painel aberto), num subprocesso para a leitura nunca travar. Quando nada mudou, o agente responde só "304, igual", sem conteúdo.
@@ -152,7 +153,7 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | Conexão | endereço, token | do `config.lua` |
 | Idioma | automático, português (Brasil) ou inglês | automático (o do KOReader) |
 
-No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`. Opcional: `host`, o IP em que o agente responde (por exemplo, o da rede de casa). Sem ele, responde em todas as redes em que o computador estiver.
+No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`. Opcionais: `host`, o IP em que o agente responde (por exemplo, o da rede de casa); sem ele, responde em todas as redes em que o computador estiver. E `"uso_da_conta": false`, para o agente não consultar o uso na sua conta (o % passa a vir só da statusLine).
 
 ## Estrutura
 
@@ -162,7 +163,7 @@ kindle-claude2.0/
 │   ├── setup.py             assistente: hooks + conexão
 │   ├── claudinho.py         agente: monta o estado e serve para o Kindle
 │   ├── hook.py              hook do Claude Code (uma entrada por sessão)
-│   ├── statusline.py        guarda o % de uso e repassa a sua statusLine
+│   ├── statusline.py        guarda o % de uso (reserva) e repassa a sua statusLine
 │   └── shells.py            qual shell o Claude Code usa (bash, Git Bash ou PowerShell)
 ├── kindle/claudinho.koplugin/
 │   ├── main.lua             plugin: menu, linha do topo, buscas, ciclo de vida
@@ -180,7 +181,8 @@ kindle-claude2.0/
 ## Limitações
 
 - Só enxerga o Claude Code rodando no computador do agente. Conversas no app do Claude e agentes em outras máquinas não aparecem.
-- O % de uso só existe nos planos Pro/Max, e aparece depois da primeira resposta da sessão. Até lá, a linha do topo mostra 0% e o painel mostra "--".
+- O % de uso só existe nos planos Pro/Max. Ele vem da sua conta com o login do `claude` do terminal (`~/.claude/.credentials.json`): sem esse login, vem da statusLine, que só roda no `claude` do terminal (o app de desktop não a chama) e só depois da primeira resposta. Sem nenhum dos dois, a linha do topo mostra 0% e o painel mostra "--".
+- Para ler o uso, o agente usa o mesmo endpoint interno do `/usage` (não documentado, pode mudar). O token de acesso do `claude` dura poucas horas; vencido, o agente renova como o Claude Code faz e grava o novo no `.credentials.json` (com backup em `.credentials.json.bak-claudinho`). Se der errado, o `claude` do terminal pede `/login` de novo; sua conta e o app de desktop não são afetados.
 - O total de tokens inclui leitura de cache, por isso fica alto.
 - Só funciona com o Kindle e o PC na mesma rede. Wi-Fi de visitante ou corporativa que isola os aparelhos bloqueia a conexão.
 - O estado vai sem criptografia (HTTP) pela rede de casa: nomes de ferramentas, de arquivos, do projeto e a descrição curta do comando. Comandos inteiros, prompts, campos de ferramentas MCP e conteúdo de arquivos não saem do PC. Veja [docs/como-funciona.md](docs/como-funciona.md#o-que-sai-do-pc).

@@ -9,7 +9,7 @@ O desenho e a lógica do plugin rodam fora do Kindle, num LuaJIT puro, com o Bli
 - a `libfreetype.so.6` do sistema (o `boot.lua` procura nos lugares de costume e cria o link em `libs/`, na pasta onde você roda; em outro lugar, defina `FREETYPE=caminho/da/libfreetype.so.6`).
 
 ```sh
-# lado do PC (so Python): hooks, privacidade das descricoes, tokens, setup e servidor
+# lado do PC (so Python): hooks, privacidade das descricoes, tokens, uso da conta, setup e servidor
 python3 tools/testes_pc.py
 
 export KO=~/src/koreader KOBASE=~/src/koreader-base
@@ -31,6 +31,10 @@ luajit tools/harness/imagens.lua /tmp en     # em ingles
 O `fumaca.lua` confere: menu registrado, linha do topo no ReaderView (centralizada, pílula preta pedindo permissão), leitura em subprocesso, refresh só da faixa da linha, desligar e ligar a linha, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, a margem de cima reservada (sem mexer na que o livro grava, abaixo do cabeçalho do livro, e de volta ao desligar), "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
 
 O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
+
+O uso da conta é testado contra uma Anthropic de mentira (um servidor local; `CLAUDINHO_USO_URL` e `CLAUDINHO_TOKEN_URL` trocam os endereços), com um `.credentials.json` falso no HOME de teste: token válido (só consulta), vencido (renova como o Claude Code, grava só o `claudeAiOauth`, faz backup, mantém as permissões), recusado antes de vencer (renova e tenta de novo), renovação recusada (volta para a statusLine e pede `/login`), sem login e com `"uso_da_conta": false`.
+
+No Windows, o teste "6 sessões gravando juntas" da statusLine falha: a troca do `statusline.json` dá `PermissionError` quando outra sessão está lendo, e sobra um arquivo temporário. No Linux passa.
 
 ## Regerar sprites e fontes
 
