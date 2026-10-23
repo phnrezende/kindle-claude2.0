@@ -2,15 +2,13 @@
 """Agente do Claudinho no computador.
 
 Junta o que os hooks e a statusLine do Claude Code gravaram, mais os tokens
-dos historicos, num JSON pequeno (o "estado") e entrega para o Kindle:
-
-  modo local   serve http://<ip>:<porta>/estado.json na rede de casa
-  modo remoto  envia o estado para o relay na nuvem (Cloudflare), de onde o
-               Kindle le em qualquer rede
+dos historicos, num JSON pequeno (o "estado") e serve para o Kindle na rede
+de casa, em http://<ip>:<porta>/estado.json.
 
     python3 claudinho.py                 roda conforme o config.json
     python3 claudinho.py --demo MODO     dados ficticios (testar sem Claude Code)
     python3 claudinho.py --estado        imprime o estado atual e sai
+    python3 claudinho.py --porta 8787    usa outra porta
 
 Modos de demo: cozinhando, cebola, pensando, chamando, prato, esperando,
 descansando, varios
@@ -20,15 +18,13 @@ server.py do kindle-claude (guithepc, licenca MIT).
 """
 import glob
 import hashlib
+import hmac
 import json
 import os
-import signal
 import socket
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -45,13 +41,15 @@ PRATO_SECONDS = 60          # quanto tempo o "prato pronto" fica depois de termi
 REST_AFTER = 30 * 60        # parado ha mais que isso = descansando
 TOOL_LINGER = 45            # a ferramenta continua na barra esse tempo depois de usada
 TOOL_STALE = 10 * 60        # ferramenta "rodando" ha mais que isso: considera encerrada
+PARADO_APOS = 10 * 60       # "trabalhando" sem nenhum evento ha mais que isso: foi
+                            # interrompido (Esc ou erro de API nao disparam o Stop)
 TOKENS_A_CADA = 30          # segundos entre recontagens dos historicos
 WEEKDAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 
-# envio para o relay (modo remoto)
-ENVIO_TROCA_MODO = 3        # mudou o modo (ex.: pediu permissao): envia logo
-ENVIO_DETALHES = 15         # so mudou ferramenta/numeros: no maximo a cada 15 s
-ENVIO_BATIMENTO = 300       # nada mudou: avisa que esta vivo a cada 5 min
+# limites de tamanho do que vai para o Kindle (o painel corta o resto de qualquer jeito)
+MAX_FERRAMENTA = 40
+MAX_DESCRICAO = 80
+MAX_PROJETO = 40
 
 
 def log(*args):
@@ -67,15 +65,64 @@ def read_json(path):
 
 
 def load_config():
-    cfg = {"modo": "local", "porta": 8787, "token": "", "relay_url": "", "token_pc": ""}
+    cfg = {"porta": 8787, "token": ""}
     cfg.update(read_json(CONFIG))
     return cfg
 
 
+def cortar(texto, n):
+    """Uma linha so, sem espacos repetidos, com no maximo `n` caracteres."""
+    texto = " ".join(str(texto or "").split())
+    return texto if len(texto) <= n else texto[:n - 1].rstrip() + "…"
+
+
 # ------------------------------------------------------------------ tokens
 
+# por arquivo: ate onde ja foi lido e as mensagens encontradas. Os historicos
+# so crescem, entao a cada recontagem le apenas o pedaco novo.
 _tok_cache = {}
 _tok_result = {"t": 0, "valor": (0, 0, None)}
+
+
+def _ler_novas(path, cache, cutoff_dt):
+    try:
+        tamanho = os.path.getsize(path)
+    except OSError:
+        return
+    if tamanho < cache["pos"]:                 # arquivo foi reescrito: recomeca
+        cache["pos"], cache["entries"] = 0, {}
+    if tamanho == cache["pos"]:
+        return
+    with open(path, "rb") as f:
+        f.seek(cache["pos"])
+        bloco = f.read()
+    fim = bloco.rfind(b"\n")
+    if fim < 0:                                 # linha ainda sendo escrita
+        return
+    pos = cache["pos"]
+    for bruta in bloco[:fim + 1].split(b"\n"):
+        inicio, pos = pos, pos + len(bruta) + 1
+        if b'"usage"' not in bruta:
+            continue
+        try:
+            d = json.loads(bruta.decode("utf-8", errors="ignore"))
+            msg = d.get("message") or {}
+            usage = msg.get("usage")
+            if not usage:
+                continue
+            dt = datetime.fromisoformat(d["timestamp"].replace("Z", "+00:00")).astimezone()
+        except Exception:
+            continue
+        if dt < cutoff_dt:
+            continue
+        key = f'{msg.get("id")}|{d.get("requestId")}'
+        if key == "None|None":
+            key = f"{path}:{inicio}"
+        tokens = sum(int(usage.get(k) or 0) for k in (
+            "input_tokens", "output_tokens",
+            "cache_creation_input_tokens", "cache_read_input_tokens"))
+        cache["entries"][key] = (dt, tokens)
+    cache["pos"] += fim + 1
 
 
 def token_stats():
@@ -84,47 +131,31 @@ def token_stats():
     today = now.date()
     hour_ago = now - timedelta(hours=1)
     cutoff = time.time() - 8 * 86400
+    cutoff_dt = now - timedelta(days=8)
     seen, per_day, last_hour = set(), {}, 0
+    vistos = set()
     for path in glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
         try:
-            mtime = os.path.getmtime(path)
+            if os.path.getmtime(path) < cutoff:
+                continue
         except OSError:
             continue
-        if mtime < cutoff:
-            continue
-        cached = _tok_cache.get(path)
-        if not cached or cached[0] != mtime:
-            entries = {}
-            with open(path, encoding="utf-8", errors="ignore") as f:
-                for n, line in enumerate(f):
-                    if '"usage"' not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                        msg = d.get("message") or {}
-                        usage = msg.get("usage")
-                        if not usage:
-                            continue
-                        dt = datetime.fromisoformat(
-                            d["timestamp"].replace("Z", "+00:00")).astimezone()
-                    except Exception:
-                        continue
-                    key = f'{msg.get("id")}|{d.get("requestId")}'
-                    if key == "None|None":
-                        key = f"{path}:{n}"
-                    tokens = sum(int(usage.get(k) or 0) for k in (
-                        "input_tokens", "output_tokens",
-                        "cache_creation_input_tokens", "cache_read_input_tokens"))
-                    entries[key] = (dt, tokens)
-            cached = (mtime, entries)
-            _tok_cache[path] = cached
-        for key, (dt, tokens) in cached[1].items():
+        vistos.add(path)
+        cache = _tok_cache.setdefault(path, {"pos": 0, "entries": {}})
+        _ler_novas(path, cache, cutoff_dt)
+        # mensagens com mais de 8 dias nao entram em nenhuma conta
+        velhas = [k for k, (dt, _) in cache["entries"].items() if dt < cutoff_dt]
+        for k in velhas:
+            del cache["entries"][k]
+        for key, (dt, tokens) in cache["entries"].items():
             if key in seen:
                 continue
             seen.add(key)
             per_day[dt.date()] = per_day.get(dt.date(), 0) + tokens
             if dt >= hour_ago:
                 last_hour += tokens
+    for path in [p for p in _tok_cache if p not in vistos]:   # apagados ou antigos
+        del _tok_cache[path]
     past = [v for day, v in per_day.items() if today - timedelta(days=7) <= day < today]
     avg = sum(past) / len(past) if past else None
     return per_day.get(today, 0), last_hour, avg
@@ -157,7 +188,10 @@ def session_view(s, now):
         recent = now - started < TOOL_LINGER
         if (s.get("tool_running") and now - started < TOOL_STALE) or recent:
             return 4, "cozinhando", last, s.get("tool_name", ""), s.get("tool_desc", "")
-        return 3, "cozinhando", last, "", "pensando…"
+        if now - last < PARADO_APOS:
+            return 3, "cozinhando", last, "", "pensando…"
+        # sem evento nenhum ha muito tempo: foi interrompido e o Stop nao veio
+        return 1, "esperando", last, "", "nada no fogo"
     if status == "done":
         done_at = float(s.get("done_at") or last)
         if now - done_at < PRATO_SECONDS:
@@ -190,7 +224,7 @@ def demo(mode):
     descs = ["server.py", "rate_limits", "Rodar os testes", "notion-search", "DashboardController.java"]
     names = {"cozinhando": "Edit", "sopa": "Edit", "cebola": "Bash", "tempero": "Grep"}
     tool = names.get(mode, "Edit")
-    tdesc = {"Edit": "DashboardController.java", "Bash": "mvn test -pl api",
+    tdesc = {"Edit": "DashboardController.java", "Bash": "Rodar os testes da API",
              "Grep": "rate_limits"}[tool]
     s = {"status": "working", "last_event": now - 7, "tool_running": True,
          "tool_started": now - 2, "tool_name": tool, "tool_desc": tdesc, "project": "camaleao"}
@@ -203,7 +237,7 @@ def demo(mode):
         s["tool_started"] = now - 120
     elif mode == "chamando":
         s.update(status="waiting", waiting_since=now - 40, last_event=now - 40, tool_started=now - 45,
-                 tool_name="Bash", tool_desc="rm -rf build/")
+                 tool_name="Bash", tool_desc="Apagar a pasta build")
     elif mode == "prato":
         s.update(status="done", done_at=now - 12, last_event=now - 12)
     elif mode == "esperando":
@@ -233,12 +267,13 @@ def fmt_reset(epoch, week):
     return f"zera {WEEKDAYS[dt.weekday()]} {dt:%H:%M}" if week else f"zera às {dt:%H:%M}"
 
 
-def _tres_digitos(n):
-    """Arredonda para o que o Kindle consegue mostrar (evita reenvio a toa)."""
+def como_kindle(n):
+    """Arredonda para a precisao que o Kindle mostra (E.fmt_tokens): "2,5 mi",
+    "32 mil", "512". Assim o rev so muda quando o numero na tela mudaria."""
     if not n:
         return n
-    mag = 10 ** max(0, len(str(int(n))) - 3)
-    return int(round(n / mag) * mag)
+    passo = 100_000 if n >= 100_000 else 1000 if n >= 1000 else 1
+    return int((n + passo // 2) // passo * passo)
 
 
 def montar_estado(now=None, demo_mode=None):
@@ -252,7 +287,7 @@ def montar_estado(now=None, demo_mode=None):
 
     tools = state.get("tools") or []
     past = tools[:-1] if info["tool"] and tools else tools
-    antes = [t.get("name", "?") for t in reversed(past[-4:])]
+    antes = [cortar(t.get("name", "?"), MAX_FERRAMENTA) for t in reversed(past[-4:])]
 
     rl = status.get("rate_limits") or {}
 
@@ -267,15 +302,15 @@ def montar_estado(now=None, demo_mode=None):
         "v": VERSAO,
         "modo": info["mode"],
         "desde": int(info["since"] or 0),
-        "ferramenta": info["tool"] or "",
-        "descricao": info["desc"] or "",
+        "ferramenta": cortar(info["tool"], MAX_FERRAMENTA),
+        "descricao": cortar(info["desc"], MAX_DESCRICAO),
         "ativos": info["active"],
-        "projeto": info["project"] or "",
+        "projeto": cortar(info["project"], MAX_PROJETO),
         "antes": antes,
         "sessao": limite("five_hour", False),
         "semana": limite("seven_day", True),
-        "tokens": {"hoje": _tres_digitos(int(hoje or 0)), "hora": _tres_digitos(int(hora or 0)),
-                   "media": None if media is None else _tres_digitos(int(media))},
+        "tokens": {"hoje": como_kindle(int(hoje or 0)), "hora": como_kindle(int(hora or 0)),
+                   "media": None if media is None else como_kindle(int(media))},
     }
     estado["rev"] = hashlib.sha1(json.dumps(estado, sort_keys=True).encode()).hexdigest()[:12]
     estado["agora"] = int(now)
@@ -286,7 +321,7 @@ def to_bytes(estado):
     return json.dumps(estado, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-# ------------------------------------------------------------------ modo local
+# ------------------------------------------------------------------ servidor
 
 class Servidor:
     token = ""
@@ -311,14 +346,14 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(url.query)
         try:
             if url.path == "/estado.json":
-                if Servidor.token and not self.autorizado(q):
+                if Servidor.token and not self.autorizado():
                     return self.reply(401, b'{"erro":"token invalido"}', "application/json")
                 demo_mode = (q.get("demo") or [Servidor.demo])[0]
+                if demo_mode is not None and demo_mode not in DEMOS:
+                    return self.reply(400, b'{"erro":"demo desconhecida"}', "application/json")
                 estado = Servidor.estado(demo_mode)
                 etag = f'"{estado["rev"]}"'
-                # idade 0: no modo local o estado e sempre fresco
-                extra = {"ETag": etag, "X-Claudinho-Idade": "0",
-                         "X-Claudinho-Atualizado": str(int(time.time()))}
+                extra = {"ETag": etag}
                 if self.headers.get("If-None-Match") == etag:
                     return self.reply(304, b"", None, extra)
                 return self.reply(200, to_bytes(estado), "application/json; charset=utf-8", extra)
@@ -326,17 +361,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, b"ok\n", "text/plain")
             if url.path == "/":
                 txt = ("Claudinho no ar.\n\nO Kindle le /estado.json"
-                       " (com o token, se configurado).\nTeste: /estado.json?demo=chamando\n")
+                       " (com Authorization: Bearer TOKEN).\nTeste: /estado.json?demo=chamando\n")
                 return self.reply(200, txt.encode(), "text/plain; charset=utf-8")
         except Exception as e:
-            return self.reply(500, f"erro: {e}".encode(), "text/plain; charset=utf-8")
+            log(f"Erro ao responder {url.path}: {e!r}")
+            return self.reply(500, b"erro interno", "text/plain; charset=utf-8")
         self.reply(404, b"nao encontrado", "text/plain")
 
-    def autorizado(self, q):
+    def autorizado(self):
         auth = self.headers.get("Authorization") or ""
-        token = auth[7:].strip() if auth.lower().startswith("bearer ") else (q.get("token") or [""])[0]
-        return bool(token) and hashlib.sha256(token.encode()).digest() == \
-            hashlib.sha256(Servidor.token.encode()).digest()
+        if not auth.lower().startswith("bearer "):
+            return False
+        token = auth[7:].strip()
+        return bool(token) and hmac.compare_digest(token.encode(), Servidor.token.encode())
 
     def reply(self, code, body, ctype, extra=None):
         self.send_response(code)
@@ -365,12 +402,18 @@ def ip_local():
         return "127.0.0.1"
 
 
-def rodar_local(cfg, demo_mode):
+def rodar(cfg, demo_mode):
     Servidor.token = cfg.get("token") or ""
     Servidor.demo = demo_mode
     porta = int(cfg.get("porta") or 8787)
-    srv = ThreadingHTTPServer(("0.0.0.0", porta), Handler)
-    log(f"Modo local. O Kindle le http://{ip_local()}:{porta}/estado.json")
+    try:
+        srv = ThreadingHTTPServer(("0.0.0.0", porta), Handler)
+    except OSError as e:
+        sys.exit(f"Nao consegui abrir a porta {porta} ({e}). Ja tem outro claudinho.py rodando?"
+                 " Use --porta para escolher outra.")
+    log(f"O Kindle le http://{ip_local()}:{porta}/estado.json")
+    if not Servidor.token:
+        log("Aviso: sem token. Qualquer aparelho da rede consegue ler o estado. Rode setup.py.")
     if demo_mode:
         log(f"Demo ligada: '{demo_mode}' (dados ficticios)")
     log("Ctrl+C para sair.")
@@ -380,84 +423,22 @@ def rodar_local(cfg, demo_mode):
         pass
 
 
-# ------------------------------------------------------------------ modo remoto
-
-def enviar(cfg, estado):
-    url = cfg["relay_url"].rstrip("/") + "/estado"
-    req = urllib.request.Request(url, data=to_bytes(estado), method="PUT", headers={
-        "Authorization": f"Bearer {cfg['token_pc']}",
-        "Content-Type": "application/json",
-        "User-Agent": "claudinho-pc/1",
-    })
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status
-
-
-def rodar_remoto(cfg, demo_mode):
-    if not cfg.get("relay_url") or not cfg.get("token_pc"):
-        sys.exit("Modo remoto sem relay configurado. Rode: python3 setup.py")
-    log(f"Modo remoto. Enviando para {cfg['relay_url']}")
-    if demo_mode:
-        log(f"Demo ligada: '{demo_mode}' (dados ficticios)")
-    log("Ctrl+C para sair.")
-    parar = threading.Event()
-
-    def sair(*_):
-        parar.set()
-    signal.signal(signal.SIGINT, sair)
-    try:
-        signal.signal(signal.SIGTERM, sair)
-    except (AttributeError, ValueError):
-        pass
-
-    last_rev, last_modo, last_push, espera, falhou = None, None, 0.0, 0.0, False
-    while not parar.is_set():
-        now = time.time()
-        estado = montar_estado(now, demo_mode)
-        rev, modo = estado["rev"], estado["modo"]
-        quer = False
-        if rev != last_rev:
-            if modo != last_modo:
-                quer = now - last_push >= ENVIO_TROCA_MODO
-            else:
-                quer = now - last_push >= ENVIO_DETALHES
-        elif now - last_push >= ENVIO_BATIMENTO:
-            quer = True
-        if quer and now >= espera:
-            try:
-                enviar(cfg, estado)
-                if falhou or last_rev is None:
-                    log("Relay recebendo o estado.")
-                last_rev, last_modo, last_push, falhou = rev, modo, now, False
-                espera = 0.0
-            except urllib.error.HTTPError as e:
-                log(f"Relay recusou ({e.code}). Confira a URL e o token com: python3 setup.py")
-                espera, falhou = now + 60, True
-            except Exception as e:
-                if not falhou:
-                    log(f"Sem conexao com o relay ({e}). Tentando de novo...")
-                espera, falhou = now + 15, True
-        parar.wait(2)
-
-    # avisa o Kindle que o PC saiu, para ele nao ficar mostrando "cozinhando" pra sempre
-    try:
-        estado = montar_estado(time.time(), demo_mode)
-        estado["pc_offline"] = True
-        estado["rev"] += "-off"          # rev novo, senao o Kindle recebe 304 e nao ve o aviso
-        enviar(cfg, estado)
-        log("Avisei o Kindle que o PC saiu.")
-    except Exception:
-        pass
-
-
 # ------------------------------------------------------------------ main
+
+def valor_de(args, nome, padrao=None):
+    if nome not in args:
+        return padrao
+    i = args.index(nome)
+    if i + 1 >= len(args) or args[i + 1].startswith("--"):
+        return None
+    return args[i + 1]
+
 
 def main():
     args = sys.argv[1:]
     demo_mode = None
     if "--demo" in args:
-        i = args.index("--demo")
-        demo_mode = args[i + 1] if i + 1 < len(args) else "chamando"
+        demo_mode = valor_de(args, "--demo") or "chamando"
         if demo_mode not in DEMOS:
             sys.exit(f"Demo desconhecida. Use uma destas: {', '.join(DEMOS)}")
     if "--estado" in args:
@@ -465,14 +446,17 @@ def main():
         return
     cfg = load_config()
     if "--porta" in args:
-        cfg["porta"] = int(args[args.index("--porta") + 1])
+        porta = valor_de(args, "--porta")
+        if not porta or not porta.isdigit() or not 0 < int(porta) < 65536:
+            sys.exit("Use --porta com um numero, por exemplo: --porta 8787")
+        cfg["porta"] = int(porta)
     os.makedirs(DATA, exist_ok=True)
     if not os.path.exists(CONFIG):
-        log("Sem config.json ainda: rodando em modo local. Rode python3 setup.py para configurar.")
-    if cfg.get("modo") == "remoto":
-        rodar_remoto(cfg, demo_mode)
-    else:
-        rodar_local(cfg, demo_mode)
+        log("Sem config.json ainda. Rode python3 setup.py para configurar.")
+    elif cfg.get("modo") == "remoto":
+        log("O modo remoto foi removido; servindo na rede local."
+            " Rode python3 setup.py conexao e copie o plugin de novo para o Kindle.")
+    rodar(cfg, demo_mode)
 
 
 if __name__ == "__main__":

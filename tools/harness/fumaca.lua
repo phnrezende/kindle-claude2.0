@@ -192,6 +192,14 @@ local r = p:overlay_retangulo()
 confere(r.x + r.w == TELA_W - 8 and r.y == 8, "overlay no canto superior direito com margem")
 H.salvar_pgm(tela, SAIDA .. "/leitura.pgm")
 
+print("1b. testar a conexao com outra busca em andamento")
+local avisado = false
+p:buscar()
+p:buscar(function() avisado = true end)
+confere(not avisado, "espera a busca que ja estava rodando")
+rodar(3)
+confere(avisado, "avisa quando ela termina")
+
 print("2. sem mudanca: nao repinta")
 local n = #refreshes
 rodar(61)

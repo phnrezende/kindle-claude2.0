@@ -31,7 +31,7 @@ local telas = {
 
 local d = D.novo(BB, H.RT, H.fonte, sprites, 1)
 for nome, dados in pairs(telas) do
-    local v = E.interpretar(dados, agora, { recebido_em = agora, idade = 0, desvio = 0 })
+    local v = E.interpretar(dados, agora, { recebido_em = agora, desvio = 0 })
     local bb = BB.new(800, 600, BB.TYPE_BB8)
     d:painel(bb, v, "qui 22/10", "13:12", E.quadro_parado(v.modo))
     H.salvar_pgm(bb, SAIDA .. "/painel-" .. nome .. ".pgm")

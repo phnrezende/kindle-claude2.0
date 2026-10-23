@@ -1,10 +1,10 @@
 --[[--
 Busca o estado do PC sem travar a leitura.
 
-A requisicao HTTP(S) roda num subprocesso (como o KOReader faz em outras
-buscas em segundo plano); o processo principal so confere de tempos em tempos
-se a resposta chegou. Se o subprocesso nao puder ser criado, faz a busca
-direto, com prazo curto.
+A requisicao HTTP roda num subprocesso (como o KOReader faz em outras buscas
+em segundo plano); o processo principal so confere de tempos em tempos se a
+resposta chegou. Se o subprocesso nao puder ser criado, faz a busca direto,
+com prazo curto.
 ]]
 
 local UIManager = require("ui/uimanager")
@@ -21,7 +21,7 @@ local function requisitar(url, token, etag)
     local socket = require("socket")
     local socketutil = require("socketutil")
     local ltn12 = require("ltn12")
-    local http = url:match("^https:") and require("ssl.https") or require("socket.http")
+    local http = require("socket.http")
     local partes = {}
     local headers = { ["Accept"] = "application/json" }
     if token and token ~= "" then headers["Authorization"] = "Bearer " .. token end
@@ -39,27 +39,24 @@ local function requisitar(url, token, etag)
     end
     return {
         codigo = tonumber(codigo),
-        idade = tonumber(cab["x-claudinho-idade"]),   -- segundos desde o ultimo envio do PC
         etag = cab["etag"],
         corpo = table.concat(partes),
     }
 end
 
--- "codigo\nidade\netag\nerro\n" .. corpo
+-- "codigo\netag\nerro\n" .. corpo
 local function empacotar(r)
     local etag = (r.etag or ""):gsub("\n", "")
     local erro = (r.erro or ""):gsub("\n", " ")
-    return table.concat({ tostring(r.codigo or ""), tostring(r.idade or ""), etag, erro, "" }, "\n")
-        .. (r.corpo or "")
+    return table.concat({ tostring(r.codigo or ""), etag, erro, "" }, "\n") .. (r.corpo or "")
 end
 
 local function desempacotar(s)
     if not s or s == "" then return { erro = "subprocesso sem resposta" } end
-    local codigo, idade, etag, erro, corpo = s:match("^([^\n]*)\n([^\n]*)\n([^\n]*)\n([^\n]*)\n(.*)$")
+    local codigo, etag, erro, corpo = s:match("^([^\n]*)\n([^\n]*)\n([^\n]*)\n(.*)$")
     if not codigo then return { erro = "resposta ilegivel" } end
     return {
         codigo = tonumber(codigo),
-        idade = tonumber(idade),
         etag = etag ~= "" and etag or nil,
         erro = erro ~= "" and erro or nil,
         corpo = corpo,
@@ -68,7 +65,7 @@ end
 
 --[[--
 Faz GET em `url` e chama `pronto(resultado)` no processo principal.
-resultado: { codigo, idade, etag, corpo } ou { erro }
+resultado: { codigo, etag, corpo } ou { erro }
 Devolve false se ja havia uma busca em andamento.
 ]]
 function Busca.get(url, token, etag, pronto)
@@ -96,14 +93,23 @@ function Busca.get(url, token, etag, pronto)
     local inicio = os.time()
     local conferir
     conferir = function()
-        if ffiutil.isSubProcessDone(pid) then
-            terminar(desempacotar(ffiutil.readAllFromFD(fd)))
-        elseif os.time() - inicio > Busca.PRAZO then
-            ffiutil.terminateSubProcess(pid)
-            -- recolhe o processo depois, para nao virar zumbi
-            UIManager:scheduleIn(1, function() ffiutil.isSubProcessDone(pid) end)
-            ffiutil.readAllFromFD(fd)
-            terminar({ erro = "tempo esgotado" })
+        -- um erro aqui deixaria o Busca.ocupado preso e nenhuma busca rodaria mais
+        local ok, pronta, r = pcall(function()
+            if ffiutil.isSubProcessDone(pid) then
+                return true, desempacotar(ffiutil.readAllFromFD(fd))
+            elseif os.time() - inicio > Busca.PRAZO then
+                ffiutil.terminateSubProcess(pid)
+                -- recolhe o processo depois, para nao virar zumbi
+                UIManager:scheduleIn(1, function() ffiutil.isSubProcessDone(pid) end)
+                ffiutil.readAllFromFD(fd)
+                return true, { erro = "tempo esgotado" }
+            end
+            return false
+        end)
+        if not ok then
+            terminar({ erro = "falha ao ler a resposta: " .. tostring(pronta) })
+        elseif pronta then
+            terminar(r)
         else
             UIManager:scheduleIn(0.25, conferir)
         end

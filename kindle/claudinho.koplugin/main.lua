@@ -4,8 +4,7 @@ Claudinho: o Claude Code no Kindle, dentro do KOReader.
 - Painel em tela cheia (o do kindle-claude), com toque para voltar aos livros.
 - Overlay: um Claudinho pequeno num canto da pagina enquanto voce le, mostrando
   se o Claude esta trabalhando, esperando sua aprovacao ou descansando.
-- Funciona com o PC na mesma rede (modo local) ou em qualquer rede (modo remoto,
-  via relay). Para o plugin, os dois sao so uma URL que devolve o estado em JSON.
+- Le o estado do agente no PC, na mesma rede Wi-Fi: uma URL que devolve um JSON.
 
 @module koplugin.claudinho
 ]]
@@ -33,7 +32,7 @@ local E = require("claudinho/estado")
 local json = require("claudinho/json")
 local sprites = require("claudinho/sprites")
 
-local VERSAO = "1.0"
+local VERSAO = "1.1"
 
 local PADRAO = {
     overlay = true,
@@ -60,12 +59,12 @@ local CANTOS = {
 local C = {
     dados = nil,        -- ultimo JSON do PC
     recebido_em = nil,  -- os.time() do Kindle na ultima leitura que deu certo
-    idade = 0,          -- quantos segundos o estado ja tinha ao chegar
     desvio = 0,         -- relogio do Kindle menos o do PC
     etag = nil,
     falhas = 0,
     erro = nil,
     dica_mostrada = false,
+    esperando = {},     -- quem quer saber quando a busca em andamento terminar
 }
 
 local Claudinho = WidgetContainer:extend{
@@ -94,7 +93,6 @@ function Claudinho:init()
     if self.cfg.gerado_em and self.settings:readSetting("config_gerado_em") ~= self.cfg.gerado_em then
         self.settings:delSetting("url")
         self.settings:delSetting("token")
-        self.settings:delSetting("modo")
         self.settings:saveSetting("config_gerado_em", self.cfg.gerado_em)
         self.settings:flush()
     end
@@ -117,7 +115,6 @@ end
 
 function Claudinho:url() return self.settings:readSetting("url") or self.cfg.url or "" end
 function Claudinho:token() return self.settings:readSetting("token") or self.cfg.token or "" end
-function Claudinho:modo() return self.settings:readSetting("modo") or self.cfg.modo or "local" end
 
 -- ------------------------------------------------------------------ fontes
 
@@ -181,25 +178,25 @@ function Claudinho:falhou(motivo)
     C.erro = motivo
 end
 
+--- Busca o estado. `depois`, se vier, roda quando a resposta chegar, mesmo que
+--- ja houvesse outra busca em andamento (ai espera por ela).
 function Claudinho:buscar(depois)
     local url = self:url()
-    if url == "" then
-        self:falhou("sem URL configurada")
+    local motivo = (url == "" and "sem URL configurada") or (not conectado() and "Wi-Fi desligado") or nil
+    if motivo then
+        self:falhou(motivo)
         self:atualizar_vistas()
         if depois then depois() end
         return
     end
-    if not conectado() then
-        self:falhou("Wi-Fi desligado")
-        self:atualizar_vistas()
-        if depois then depois() end
-        return
-    end
-    local iniciou = Busca.get(url, self:token(), C.etag, function(r)
+    if depois then C.esperando[#C.esperando + 1] = depois end
+    -- se ja havia uma busca, o Busca.get devolve false e o fim dela avisa todo mundo
+    Busca.get(url, self:token(), C.etag, function(r)
         self:receber(r)
-        if depois then depois() end
+        local lista = C.esperando
+        C.esperando = {}
+        for _, f in ipairs(lista) do f() end
     end)
-    if not iniciou and depois then depois() end
 end
 
 function Claudinho:receber(r)
@@ -207,19 +204,17 @@ function Claudinho:receber(r)
         local dados, err = json.decode(r.corpo)
         if type(dados) == "table" then
             C.dados, C.etag, C.falhas, C.erro = dados, r.etag, 0, nil
-            C.recebido_em, C.idade = os.time(), r.idade or 0
-            C.desvio = E.desvio(dados, C.recebido_em, C.idade)
+            C.recebido_em = os.time()
+            C.desvio = E.desvio(dados, C.recebido_em)
         else
             self:falhou("resposta invalida: " .. tostring(err))
         end
     elseif r.codigo == 304 then
         -- nada mudou; o desvio do relogio continua o da ultima resposta completa
-        C.recebido_em, C.idade = os.time(), r.idade or 0
+        C.recebido_em = os.time()
         C.falhas, C.erro = 0, nil
     elseif r.codigo == 401 then
-        self:falhou("token recusado pelo PC/relay")
-    elseif r.codigo == 404 then
-        self:falhou("o PC ainda nao enviou nada (404)")
+        self:falhou("token recusado pelo PC")
     elseif r.codigo then
         self:falhou("HTTP " .. r.codigo)
     else
@@ -464,7 +459,7 @@ function Claudinho:testar_conexao()
         local texto
         if C.falhas == 0 and C.dados then
             local v = self:vista()
-            texto = string.format("Conectado (%s).\n\nClaude: %s\n%s", self:modo(), v.titulo, v.linha)
+            texto = string.format("Conectado.\n\nClaude: %s\n%s", v.titulo, v.linha)
         else
             texto = "Não consegui ler o estado.\n\n" .. (C.erro or "erro desconhecido") ..
                 "\n\nURL: " .. self:url()
@@ -530,18 +525,14 @@ function Claudinho:addToMainMenu(menu_items)
                 },
             },
             {
-                text_func = function()
-                    return "Conexão: " .. (self:modo() == "remoto" and "remota" or "local")
-                end,
+                text = "Conexão",
                 sub_item_table = {
-                    self:item_radio_modo("Local (mesma rede Wi-Fi)", "local"),
-                    self:item_radio_modo("Remota (relay na internet)", "remoto"),
                     {
                         text_func = function() return "Endereço: " .. (self:url() ~= "" and self:url() or "(vazio)") end,
                         keep_menu_open = true,
                         callback = function()
                             self:editar("Endereço do estado", "url", self:url(),
-                                "Local: http://IP-DO-PC:8787/estado.json\nRemoto: https://SEU-RELAY.workers.dev/estado")
+                                "http://IP-DO-PC:8787/estado.json (PC e Kindle na mesma rede Wi-Fi)")
                         end,
                     },
                     {
@@ -563,7 +554,6 @@ function Claudinho:addToMainMenu(menu_items)
                         callback = function(menu)
                             self.settings:delSetting("url")
                             self.settings:delSetting("token")
-                            self.settings:delSetting("modo")
                             self.settings:flush()
                             C.etag, C.falhas = nil, 0
                             self:reiniciar(0)
@@ -585,25 +575,6 @@ function Claudinho:addToMainMenu(menu_items)
                 end,
             },
         },
-    }
-end
-
-function Claudinho:item_radio_modo(texto, modo)
-    return {
-        text = texto,
-        radio = true,
-        checked_func = function() return self:modo() == modo end,
-        keep_menu_open = true,
-        callback = function(menu)
-            self:salvar("modo", modo)
-            if menu then menu:updateItems() end
-            if self:url() == "" or (modo == "remoto") ~= (self:url():match("^https:") ~= nil) then
-                UIManager:show(InfoMessage:new{
-                    text = "Agora confira o Endereço: no modo local ele é http://IP-DO-PC:8787/estado.json, "
-                        .. "no remoto é https://SEU-RELAY.workers.dev/estado.",
-                })
-            end
-        end,
     }
 end
 

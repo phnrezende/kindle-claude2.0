@@ -11,7 +11,6 @@ Inspirado no [kindle-claude](https://github.com/guithepc/kindle-claude), de guit
 | No Kindle | scriptlet que desenha por cima de tudo | plugin do KOReader |
 | Voltar aos livros | só reiniciando ou pela rota `/parar` | um toque na tela |
 | Enquanto lê | nada | Claudinho no canto da página |
-| Redes | só a mesma Wi-Fi | local **ou** remoto (qualquer rede) |
 | Quem desenha | o PC (Pillow) envia imagens | o Kindle desenha a partir de um JSON de ~400 bytes |
 | PC | macOS/Linux + Pillow | macOS, Linux ou Windows, só Python |
 
@@ -51,14 +50,13 @@ flowchart LR
   A[Claude Code<br/>hooks + statusLine] --> B[pc/data/*.json]
   H[~/.claude/projects<br/>históricos] --> C
   B --> C[pc/claudinho.py<br/>monta o estado]
-  C -->|modo local: HTTP na Wi-Fi| K[Kindle<br/>plugin do KOReader]
-  C -->|modo remoto: HTTPS| R[relay<br/>Cloudflare Worker] -->|HTTPS| K
+  C -->|HTTP na Wi-Fi de casa| K[Kindle<br/>plugin do KOReader]
 ```
 
 1. Os **hooks** do Claude Code gravam o que cada sessão está fazendo; a **statusLine** guarda o % de uso.
 2. O **agente** (`pc/claudinho.py`) junta tudo num JSON pequeno, o "estado".
-3. **Modo local:** o agente responde na rede de casa. **Modo remoto:** o agente envia o estado para um relay gratuito na Cloudflare, e o Kindle lê de lá, de qualquer rede.
-4. O **plugin** busca o estado a cada 60 s lendo (30 s com o painel aberto), num subprocesso para a leitura nunca travar. Quando nada mudou, o servidor responde só "304, igual", sem conteúdo.
+3. O agente responde na rede de casa. Kindle e PC precisam estar na mesma Wi-Fi.
+4. O **plugin** busca o estado a cada 60 s lendo (30 s com o painel aberto), num subprocesso para a leitura nunca travar. Quando nada mudou, o agente responde só "304, igual", sem conteúdo.
 
 Detalhes em [docs/como-funciona.md](docs/como-funciona.md).
 
@@ -68,7 +66,7 @@ Detalhes em [docs/como-funciona.md](docs/como-funciona.md).
 
 - **Kindle com jailbreak e KOReader.** Guias: [jailbreak](https://kindlemodding.org/jailbreaking/) e [KOReader](https://kindlemodding.org/jailbreaking/whats-next/getting-koreader/) no Kindle Modding. Feito para o Kindle básico de 10ª geração (600×800), mas o painel se ajusta a outras telas.
 - **Computador** com Python 3.9+ e o Claude Code. Não precisa instalar nenhuma biblioteca.
-- Para o **modo remoto:** uma conta gratuita na Cloudflare e o Node.js (só para publicar o relay uma vez).
+- Kindle e computador **na mesma rede Wi-Fi**.
 
 ### 1. No computador
 
@@ -81,9 +79,8 @@ python3 pc/setup.py
 O assistente:
 
 1. liga os hooks e a statusLine no `~/.claude/settings.json` (com backup, e mantendo a sua statusLine antiga);
-2. pergunta **local ou remoto**;
-3. no remoto, publica o relay na sua conta Cloudflare e testa;
-4. grava `pc/config.json` e `kindle/claudinho.koplugin/config.lua`.
+2. pergunta o IP do computador e a porta (o padrão serve quase sempre) e gera um token;
+3. grava `pc/config.json` e `kindle/claudinho.koplugin/config.lua`.
 
 Depois, deixe o agente rodando:
 
@@ -93,7 +90,7 @@ python3 pc/claudinho.py
 
 Reinicie as sessões do Claude Code que já estavam abertas, para elas passarem a mandar eventos.
 
-Quer trocar de modo depois? `python3 pc/setup.py modo`. Passo a passo do remoto em [docs/remoto.md](docs/remoto.md).
+Mudou o IP ou a porta? `python3 pc/setup.py conexao` e copie o plugin de novo.
 
 ### 2. No Kindle
 
@@ -139,23 +136,19 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | | animar o mascote | sim |
 | | não deixar o Kindle dormir | sim |
 | Atualizar a cada | lendo / com o painel aberto | 60 s / 30 s |
-| Conexão | local ou remota, endereço, token | do `config.lua` |
+| Conexão | endereço, token | do `config.lua` |
 
-No computador (`pc/config.json`, escrito pelo setup): `modo`, `porta` (8787), `token`, `relay_url`, `token_pc`.
+No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`.
 
 ## Estrutura
 
 ```
 kindle-claude2.0/
 ├── pc/
-│   ├── setup.py             assistente: hooks + modo local/remoto
-│   ├── claudinho.py         agente: monta o estado e serve (local) ou envia (remoto)
+│   ├── setup.py             assistente: hooks + conexão
+│   ├── claudinho.py         agente: monta o estado e serve para o Kindle
 │   ├── hook.py              hook do Claude Code (uma entrada por sessão)
 │   └── statusline.py        guarda o % de uso e repassa a sua statusLine
-├── relay/
-│   ├── worker.js            Cloudflare Worker + Durable Object (plano gratuito)
-│   ├── wrangler.toml
-│   └── servidor_teste.mjs   o relay rodando localmente no Node, para testes
 ├── kindle/claudinho.koplugin/
 │   ├── main.lua             plugin: menu, overlay, buscas, ciclo de vida
 │   ├── claudinho/           painel, desenho, estado, busca, json, sprites
@@ -173,13 +166,14 @@ kindle-claude2.0/
 - Só enxerga o Claude Code rodando no computador do agente. Conversas no app do Claude e agentes em outras máquinas não aparecem.
 - O % de uso só existe nos planos Pro/Max, e aparece depois da primeira resposta da sessão.
 - O total de tokens inclui leitura de cache, por isso fica alto.
-- No modo remoto, o estado passa pela sua conta Cloudflare: nomes de ferramentas, de arquivos e do projeto. Veja o que é enviado em [docs/remoto.md](docs/remoto.md#o-que-sai-do-seu-pc).
+- Só funciona com o Kindle e o PC na mesma rede. Wi-Fi de visitante ou corporativa que isola os aparelhos bloqueia a conexão.
+- O estado vai sem criptografia (HTTP) pela rede de casa: nomes de ferramentas, de arquivos, do projeto e a descrição curta do comando. Comandos inteiros, prompts e conteúdo de arquivos não saem do PC. Veja [docs/como-funciona.md](docs/como-funciona.md#o-que-sai-do-pc).
 - Precisa do KOReader. Livros com DRM da Amazon não abrem nele.
 - O overlay pode cobrir um pedacinho do texto em margens apertadas. Aumente a margem superior do livro ou escolha outro canto.
 
 ## Situação
 
-O desenho do painel e do overlay foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, comparado ao render do original. O ciclo completo (agente → relay → plugin) passou nos testes automatizados com um KOReader simulado. **Ainda falta testar no emulador do KOReader e no aparelho.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
+O desenho do painel e do overlay foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, comparado ao render do original. O ciclo completo (agente → plugin) passou nos testes automatizados com um KOReader simulado. **Ainda falta testar no emulador do KOReader e no aparelho.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
 
 ## Créditos
 

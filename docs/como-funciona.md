@@ -4,9 +4,10 @@
 
 Igual ao [kindle-claude](https://github.com/guithepc/kindle-claude), de onde vem esta parte:
 
-- **Hooks** (`pc/hook.py`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Notification`, `Stop` e `SessionEnd` gravam cada sessão, pelo `session_id`, em `pc/data/state.json`. Uma trava de arquivo deixa vários agentes escreverem ao mesmo tempo (agora também no Windows).
+- **Hooks** (`pc/hook.py`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure` e `SessionEnd` gravam cada sessão, pelo `session_id`, em `pc/data/state.json`. Uma trava de arquivo deixa vários agentes escreverem ao mesmo tempo (também no Windows).
+- Do `Notification`, só contam os avisos em que o Claude espera uma resposta sua: pedido de permissão e perguntas (`permission_prompt`, `elicitation_dialog`…). O aviso de "parado há 60 s" (`idle_prompt`) e os outros são ignorados, para o Kindle não ficar "Te chamando!" depois de cada resposta.
 - **statusLine** (`pc/statusline.py`): guarda `rate_limits.five_hour` e `rate_limits.seven_day` em `pc/data/statusline.json`, e continua mostrando a statusLine que você já tinha.
-- **Tokens**: o agente soma `input + output + cache_creation + cache_read` dos históricos em `~/.claude/projects/**/*.jsonl`, sem contar duas vezes a mesma mensagem, a cada 30 s no máximo.
+- **Tokens**: o agente soma `input + output + cache_creation + cache_read` dos históricos em `~/.claude/projects/**/*.jsonl`, sem contar duas vezes a mesma mensagem, a cada 30 s no máximo. Cada arquivo é lido só a partir de onde parou da última vez.
 
 ## O estado
 
@@ -23,21 +24,43 @@ O agente (`pc/claudinho.py`) junta as sessões, escolhe a mais urgente (pedindo 
 | `tokens` | `hoje`, `hora`, `media`, arredondados ao que o Kindle mostra |
 | `rev` | resumo do conteúdo: muda só quando algo visível muda |
 | `agora` | relógio do PC no momento |
-| `pc_offline` | o agente foi encerrado |
 
-O `rev` ignora o `agora` e arredonda os números para a precisão que o painel mostra. Assim, o Kindle e o relay só trabalham quando a tela realmente mudaria.
+O `rev` ignora o `agora` e arredonda os números para a precisão que o painel mostra (`2,5 mi`, `32 mil`). Assim, o Kindle só redesenha quando a tela realmente mudaria.
+
+Uma sessão "trabalhando" sem nenhum evento há mais de 10 minutos passa a contar como parada. O `Stop` não dispara quando você interrompe com Esc, e um erro da API dispara o `StopFailure`; sem isso, o Kindle ficaria "Cozinhando…" por meia hora. Uma ferramenta que roda mais de 10 minutos seguidos (um build longo, por exemplo) também cai nessa regra.
+
+## O que sai do PC
+
+O estado é um JSON pequeno, assim:
+
+```json
+{"v":1,"modo":"cozinhando","desde":1792715237,"ferramenta":"Edit",
+ "descricao":"DashboardController.java","ativos":1,"projeto":"camaleao",
+ "antes":["Read","Grep","Bash"],"sessao":{"pct":11,"zera":"zera às 15:00"},
+ "semana":{"pct":19,"zera":"zera dom 21:00"},
+ "tokens":{"hoje":2500000,"hora":400000,"media":1800000},"rev":"bcd87aea4697","agora":1792715244}
+```
+
+Na `descricao` vai só:
+
+- o nome do arquivo (Read, Edit, Write…), sem a pasta;
+- o padrão de busca (Grep, Glob);
+- o domínio de uma URL (WebFetch), sem o caminho;
+- a descrição curta que o Claude dá ao comando (Bash) ou à tarefa. Se o comando não tiver descrição, vai só o nome do programa (`npm …`), nunca o comando com os argumentos.
+
+Prompts, textos de pesquisa, comandos inteiros e conteúdo de arquivos não saem do PC. Cada texto é cortado em até 80 caracteres.
 
 ## Transporte
 
-O Kindle sempre **puxa**. Os dois modos falam o mesmo protocolo:
+O Kindle sempre **puxa**, pela rede de casa:
 
-| | Modo local | Modo remoto |
-|---|---|---|
-| Endereço | `http://IP-DO-PC:8787/estado.json` | `https://SEU-RELAY.workers.dev/estado` |
-| Quem responde | o agente no PC | o relay (Cloudflare Worker + Durable Object) |
-| Autenticação | `Authorization: Bearer TOKEN` | idem (o PC grava com outro token) |
-| Nada mudou | `304` (com `If-None-Match`) | `304` |
-| `X-Claudinho-Idade` | sempre 0 | segundos desde o último envio do PC |
+| | |
+|---|---|
+| Endereço | `http://IP-DO-PC:8787/estado.json` |
+| Autenticação | `Authorization: Bearer TOKEN` (o token do `pc/config.json`) |
+| Nada mudou | `304` (com `If-None-Match`) |
+
+É HTTP simples, sem criptografia: qualquer aparelho na mesma rede consegue ver o estado passando, mas sem o token não consegue pedir.
 
 ## No Kindle (plugin)
 
@@ -47,10 +70,11 @@ O Kindle sempre **puxa**. Os dois modos falam o mesmo protocolo:
 - A requisição roda num **subprocesso** (como o KOReader faz em outras buscas em segundo plano). O processo principal só confere a cada 0,25 s se a resposta chegou, então a virada de página nunca espera a rede.
 - Se o Wi-Fi está desligado, nem tenta (não fica travado resolvendo nome).
 - Ao dormir, para. Ao acordar, busca em 3 s. Quando o Wi-Fi conecta, busca em 1 s.
+- Três buscas seguidas sem resposta, ou mais de 10 minutos sem nenhuma resposta, e o Kindle mostra **"Sem sinal do PC"**.
 
 ### Relógios
 
-O Kindle calcula a diferença entre o relógio dele e o do PC a cada resposta completa (`agora` do estado mais a idade informada pelo servidor). O "há X min" e o "sem sinal" usam essa correção, então um Kindle com a hora errada não mostra tempos absurdos. O relógio grande do painel é o do Kindle.
+O Kindle calcula a diferença entre o relógio dele e o do PC a cada resposta completa (o `agora` do estado). O "há X min" usa essa correção, então um Kindle com a hora errada não mostra tempos absurdos. O relógio grande do painel é o do Kindle.
 
 ### Overlay
 
