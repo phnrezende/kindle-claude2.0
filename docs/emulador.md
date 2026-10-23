@@ -58,6 +58,7 @@ EMULATE_READER_W=600 EMULATE_READER_H=800 EMULATE_READER_FLASH=1 ./koreader-*.Ap
 | Menu | clique no topo da tela → aba Ferramentas | item **Claudinho (Claude Code)** |
 | Conexão | Claudinho → Conexão → Testar a conexão agora | "Conectado. Claude: Te chamando!" |
 | Linha do topo | abra um livro (qualquer EPUB) | "Claude ○○● 11%" centralizada no topo, em branco numa pílula preta no demo `chamando`; o texto começa logo abaixo dela |
+| Tocar na linha | clique na linha do topo | abre o painel; um clique no resto da faixa de cima abre o menu do KOReader, como antes |
 | Aviso de permissão | abra um livro com o demo `chamando` | "O Claude está te chamando. Bash · Apagar a pasta build" uma vez; nas buscas seguintes, não repete |
 | Só a linha atualiza | troque a demo e espere até 1 min (ou use "Testar a conexão") | com o `EMULATE_READER_FLASH`, só a faixa do topo pisca |
 | Virar a página | vire algumas páginas | a linha continua lá, sem piscar a mais |

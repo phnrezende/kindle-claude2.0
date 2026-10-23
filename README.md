@@ -34,7 +34,7 @@ Para a linha não cobrir o texto, o plugin aumenta só a margem de cima, o basta
 
 ## O painel
 
-**Claudinho → Abrir o painel**, no menu do KOReader (ou um gesto que você escolher). Um toque em qualquer lugar volta para o livro ou a biblioteca.
+Lendo, **toque na linha do topo**. Ou **Claudinho → Abrir o painel**, no menu do KOReader (ou um gesto que você escolher). Um toque em qualquer lugar volta para o livro ou a biblioteca.
 
 | Trabalhando | Pedindo aprovação | Pronto | Descansando |
 |:-:|:-:|:-:|:-:|
@@ -132,7 +132,7 @@ Guia completo em [docs/emulador.md](docs/emulador.md).
 
 | Quero… | Como |
 |---|---|
-| Ver o painel | Menu → Ferramentas → Claudinho → Abrir o painel |
+| Ver o painel | tocar na linha do topo, ou Menu → Ferramentas → Claudinho → Abrir o painel |
 | Voltar aos livros | tocar em qualquer lugar do painel |
 | Abrir com um gesto | Configurações → Toques e gestos → Gerenciador de gestos → escolha um gesto → Geral → **Claudinho: abrir o painel** |
 | Ligar/desligar a linha do topo | Claudinho → Mostrar o status no topo da página, ou o gesto **Claudinho: ligar/desligar o status no topo** |

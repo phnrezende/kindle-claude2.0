@@ -287,8 +287,8 @@ end
 -- ------------------------------------------------------------------ linha do topo
 
 -- distancias em pixels do Kindle de 600x800: do topo da pagina (ou do cabecalho
--- do livro) ate a linha, e da linha ate o texto
-local LINHA_TOPO, LINHA_RESPIRO = 4, 4
+-- do livro) ate a linha, da linha ate o texto, e a folga em volta dela para o dedo
+local LINHA_TOPO, LINHA_RESPIRO, LINHA_FOLGA = 4, 4, 10
 
 --- Pixels reais por pixel do Kindle de 600x800, como o KOReader escala a interface.
 local function escala() return Screen:scaleBySize(1000) / 1000 end
@@ -360,6 +360,29 @@ end
 function Claudinho:atualizar_linha(forcar)
     local ok, err = pcall(self.pedir_linha, self, forcar)
     if not ok then avisar("linha do topo", err) end
+end
+
+--- O toque `ges` caiu na linha do topo (com a folga para o dedo)?
+function Claudinho:toque_na_linha(ges)
+    if self.painel or self.fechado or not self.linha_img or not self:linha_alvo() then return false end
+    local pos = ges and ges.pos
+    if not pos then return false end
+    local r = self:linha_retangulo(self.linha_img:getWidth())
+    local folga = Screen:scaleBySize(LINHA_FOLGA)
+    return pos.x >= r.x - folga and pos.x <= r.x + r.w + folga and pos.y <= r.y + r.h + folga
+end
+
+--- Um toque na linha do topo abre o painel. Fora dela devolve false, e o KOReader
+--- passa o toque adiante (para o menu de cima, por exemplo).
+function Claudinho:tocou_linha(ges)
+    local ok, na_linha = pcall(self.toque_na_linha, self, ges)
+    if not ok then
+        avisar("toque na linha", na_linha)
+        return false
+    end
+    if not na_linha then return false end
+    self:abrir_painel()
+    return true
 end
 
 function Claudinho:pedir_linha(forcar)
@@ -503,6 +526,17 @@ function Claudinho:onReaderReady()
     self.leitor = true
     self.overlay_modulo = { paintTo = function(_, bb, x, y) self:pintar_linha(bb, x, y) end }
     self.ui.view:registerViewModule("claudinho", self.overlay_modulo)
+    if self.ui.registerTouchZones then
+        -- a zona vai na frente das do menu de cima e das de virar a pagina, mas so
+        -- fica com o toque que cai na linha (ver tocou_linha)
+        self.ui:registerTouchZones({ {
+            id = "claudinho_linha_tap",
+            ges = "tap",
+            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 / 8 },
+            overrides = { "readermenu_ext_tap", "readermenu_tap", "tap_forward", "tap_backward" },
+            handler = function(ges) return self:tocou_linha(ges) end,
+        } })
+    end
     self:reservar_espaco()
     self:reiniciar(2)
 end

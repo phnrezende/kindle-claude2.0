@@ -193,6 +193,11 @@ local leitor = {
         registerViewModule = function(self, nome, w) self.modulo = w end,
     },
     document = {},
+    -- como o InputContainer do KOReader: guarda as zonas de toque por id
+    zonas = {},
+    registerTouchZones = function(self, zonas)
+        for _, z in ipairs(zonas) do self.zonas[z.id] = z end
+    end,
 }
 UIManager:show(leitor)
 
@@ -251,6 +256,25 @@ end
 local n_aviso, texto_aviso = avisos()
 confere(n_aviso == 1 and texto_aviso:find("Bash · Apagar a pasta build", 1, true) ~= nil,
     "pedindo permissao: avisa na pagina, com a ferramenta (" .. tostring(n_aviso) .. ")")
+
+print("1c. tocar na linha do topo abre o painel")
+local zona = leitor.zonas.claudinho_linha_tap
+local na_frente = {}
+for _, id in ipairs(zona and zona.overrides or {}) do na_frente[id] = true end
+confere(zona and zona.ges == "tap" and na_frente.readermenu_tap and na_frente.readermenu_ext_tap,
+    "zona de toque registrada, na frente das do menu de cima")
+local function toque(x, y) return zona.handler({ ges = "tap", pos = Geom:new{ x = x, y = y, w = 0, h = 0 } }) end
+confere(toque(TELA_W / 2, 14) == true and p.painel ~= nil, "toque no meio da linha: abre o painel")
+pilha[#pilha]:onTap()
+confere(p.painel == nil, "e um toque no painel fecha, como sempre")
+confere(toque(r.x - 5, 2) == true, "pega com uma folga para o dedo (5 px antes da linha)")
+pilha[#pilha]:onTap()
+confere(toque(r.x - 30, 14) == false and p.painel == nil, "fora da linha (30 px antes): o toque segue para o menu")
+confere(toque(TELA_W / 2, 60) == false, "abaixo da linha: o toque segue para o menu")
+p:mudar("overlay", false)
+confere(toque(TELA_W / 2, 14) == false and p.painel == nil, "linha desligada: o toque segue para o menu")
+p:mudar("overlay", true)
+pagina()
 
 print("1b. testar a conexao com outra busca em andamento")
 local avisado = false
