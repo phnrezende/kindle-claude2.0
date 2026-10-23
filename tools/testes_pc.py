@@ -9,7 +9,9 @@ import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 tmp = tempfile.mkdtemp()
-shutil.copytree(os.path.join(REPO, "pc"), os.path.join(tmp, "pc"))
+# sem o config.json e os dados de quem roda os testes
+shutil.copytree(os.path.join(REPO, "pc"), os.path.join(tmp, "pc"),
+                ignore=shutil.ignore_patterns("config.json", "data", "__pycache__"))
 shutil.copytree(os.path.join(REPO, "kindle"), os.path.join(tmp, "kindle"))
 home = os.path.join(tmp, "home")
 os.makedirs(os.path.join(home, ".claude"))
@@ -488,11 +490,14 @@ novo = json.load(open(os.path.join(PC, "config.json")))
 ok(novo["token"] != antes and novo["token"] in open(os.path.join(tmp, "kindle", "claudinho.koplugin", "config.lua")).read()
    and "New token" in r.stdout, "--new-token troca o token no PC e no config.lua")
 novo["host"] = "127.0.0.1"
+novo.update(modo="remoto", relay_url="https://x.workers.dev", token_pc="pc")   # sobra da versao com relay
 json.dump(novo, open(os.path.join(PC, "config.json"), "w"))
-subprocess.run(SETUP + ["connection", "--no-prompt", "--ip", "127.0.0.1", "--port", "8796"],
-               capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+r = subprocess.run(SETUP + ["connection", "--no-prompt", "--ip", "127.0.0.1", "--port", "8796"],
+                   capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
 novo = json.load(open(os.path.join(PC, "config.json")))
 ok(novo.get("host") == "127.0.0.1" and novo["porta"] == 8796, "o setup mantem o \"host\" que voce pos no config.json")
+ok(not {"modo", "relay_url", "token_pc"} & set(novo) and "Remote mode was removed" in r.stdout,
+   "e tira as chaves do modo remoto, avisando")
 srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py")], env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 time.sleep(1.5)

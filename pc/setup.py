@@ -296,8 +296,10 @@ def configurar_conexao():
             break
         print("Type a number between 1 and 65535.")
 
-    # outras chaves que voce pos no config.json (como "host") continuam la
-    cfg = {k: v for k, v in atual.items() if k not in ("porta", "token", "modo")} if os.path.exists(CONFIG) else {}
+    # outras chaves que voce pos no config.json (como "host") continuam la;
+    # as do modo remoto, que saiu, vao embora
+    descartar = ("porta", "token", "modo", "relay_url", "token_pc")
+    cfg = {k: v for k, v in atual.items() if k not in descartar} if os.path.exists(CONFIG) else {}
     cfg.update(porta=porta, token=token)
     url = f"http://{ip}:{porta}/estado.json"
     gravar_configs(cfg, url)
