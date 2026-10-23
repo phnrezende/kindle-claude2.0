@@ -39,6 +39,7 @@ local VERSAO = "1.4"
 
 local PADRAO = {
     overlay = true,                -- a linha "Claude ●○○ 75%" no topo da pagina
+    aviso_chamando = true,         -- aviso na pagina quando o Claude pede sua permissao
     intervalo_leitura = 60,        -- segundos entre buscas enquanto le
     intervalo_painel = 30,         -- segundos entre buscas com o painel aberto
     painel_rotacao = 90,           -- 90: logo "kindle" a esquerda; 270: a direita
@@ -60,6 +61,7 @@ local C = {
     dormiu = 0,         -- segundos dormindo desde a ultima leitura que deu certo
     dormiu_em = nil,    -- os.time() quando o Kindle foi dormir
     tela_conferida = false,
+    avisado = nil,      -- o "desde" do ultimo pedido de permissao ja avisado
 }
 
 local Claudinho = WidgetContainer:extend{
@@ -174,7 +176,7 @@ end
 
 function Claudinho:precisa_buscar()
     if self.fechado or self.suspenso then return false end
-    return self.painel ~= nil or (self.leitor and self:opt("overlay"))
+    return self.painel ~= nil or (self.leitor and (self:opt("overlay") or self:opt("aviso_chamando")))
 end
 
 function Claudinho:intervalo()
@@ -260,6 +262,26 @@ function Claudinho:atualizar_vistas()
         if not ok then avisar("painel", err) end
     end
     self:atualizar_linha()
+    local ok, err = pcall(self.avisar_chamando, self)
+    if not ok then avisar("aviso de permissao", err) end
+end
+
+--- Pedindo permissao enquanto voce le: um aviso na pagina, uma vez por pedido (o
+--- "desde" muda a cada pedido novo). Com o painel aberto nao avisa, porque ele ja
+--- mostra "Te chamando!", e esse pedido conta como visto.
+function Claudinho:avisar_chamando()
+    if not self.leitor or self.fechado then return end
+    local v = self:vista()
+    if v.grupo ~= "aprovacao" then return end
+    local pedido = tostring(type(C.dados) == "table" and C.dados.desde or nil)
+    if pedido == C.avisado then return end
+    if self.painel or not self:opt("aviso_chamando") then
+        C.avisado = pedido
+        return
+    end
+    C.avisado = pedido
+    local oque = v.ferramenta ~= "" and (v.ferramenta .. " · " .. v.descricao) or v.descricao
+    UIManager:show(InfoMessage:new{ text = L.t("aviso_chamando", oque), timeout = 10 })
 end
 
 -- ------------------------------------------------------------------ linha do topo
@@ -702,6 +724,7 @@ function Claudinho:addToMainMenu(menu_items)
                 separator = true,
             },
             self:item_liga("menu_linha", "overlay", function() self:reiniciar(0) end),
+            self:item_liga("menu_aviso", "aviso_chamando", function() self:reiniciar(0) end),
             submenu("menu_painel", {
                 self:item_radio("menu_logo_esquerda", "painel_rotacao", 90),
                 self:item_radio("menu_logo_direita", "painel_rotacao", 270),

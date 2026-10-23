@@ -23,7 +23,7 @@ Uma linha pequena, centralizada no topo da página, mostra o que o Claude está 
 ![Estados da linha](docs/img/linha-estados.png)
 
 - **As três bolinhas**: a cheia diz o estado. A primeira é parado (sem tarefa, ou terminou e espera o seu próximo pedido), a segunda é trabalhando, a terceira é pedindo sua permissão.
-- **Pedindo permissão**, a linha fica branca numa pílula preta, para chamar a atenção de longe sem animação.
+- **Pedindo permissão**, a linha fica branca numa pílula preta, para chamar a atenção de longe sem animação. E, para você não perder no meio da leitura, aparece um aviso na página ("O Claude está te chamando", com a ferramenta), uma vez por pedido; ele some sozinho em 10 s ou com um toque.
 - **O %** é o quanto da sessão de 5 h já foi usado. Num plano sem limite de uso, ou antes da primeira resposta numa janela nova, aparece 0%.
 - **Com vários agentes** trabalhando ou pedindo permissão, aparece quantos: "Claude ×3". As bolinhas mostram o mais urgente.
 - **Sem sinal do PC**, a linha fica cinza, sem bolinha cheia e com "--" no lugar do %.
@@ -136,6 +136,7 @@ Guia completo em [docs/emulador.md](docs/emulador.md).
 | Voltar aos livros | tocar em qualquer lugar do painel |
 | Abrir com um gesto | Configurações → Toques e gestos → Gerenciador de gestos → escolha um gesto → Geral → **Claudinho: abrir o painel** |
 | Ligar/desligar a linha do topo | Claudinho → Mostrar o status no topo da página, ou o gesto **Claudinho: ligar/desligar o status no topo** |
+| Não receber o aviso de permissão | Claudinho → Avisar quando o Claude te chamar |
 | Painel com o logo do Kindle do outro lado | Claudinho → Painel → Logo do Kindle à direita |
 | Telas em inglês (ou em português) | Claudinho → Idioma |
 
@@ -146,6 +147,7 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | Onde | Opção | Padrão |
 |---|---|---|
 | Mostrar o status no topo da página | a linha "Claude ●○○ 75%", com o espaço dela reservado na margem de cima | ligado |
+| Avisar quando o Claude te chamar | aviso na página, uma vez por pedido de permissão, enquanto você lê | ligado |
 | Painel | logo do Kindle à esquerda/direita | esquerda |
 | | animar o mascote | sim |
 | | não deixar o Kindle dormir | sim |

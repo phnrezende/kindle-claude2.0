@@ -213,9 +213,9 @@ confere(arq ~= nil and fonte:match("^%.%./") ~= nil,
     "caminho da fonte sobe ate a raiz (o getFace do KOReader 2026.07 poe ./fonts/ na frente) e abre")
 local itens = {}
 p:addToMainMenu(itens)
-confere(itens.claudinho and #itens.claudinho.sub_item_table == 7, "menu com 7 itens")
+confere(itens.claudinho and #itens.claudinho.sub_item_table == 8, "menu com 8 itens")
 local function item(t, n) return t.sub_item_table[n] end
-local idioma = item(itens.claudinho, 6)
+local idioma = item(itens.claudinho, 7)
 require("claudinho/textos").escolher("pt")
 confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "menu em portugues")
 item(idioma, 3).callback()          -- English
@@ -241,6 +241,16 @@ confere(math.abs(r.x + r.w / 2 - TELA_W / 2) <= 1 and r.y == 4 and r.h == 20, "l
 confere(info.estado == 3 and info.alerta, "demo 'chamando': terceira bolinha, em alerta")
 confere(tela:getPixel(r.x + 2, r.y + r.h / 2):getColor8().a < 0x40, "pedindo permissao: pilula preta")
 H.salvar_pgm(tela, SAIDA .. "/leitura.pgm")
+local function avisos()
+    local n, ultima = 0, nil
+    for _, m in ipairs(mensagens) do
+        if m:find("O Claude está te chamando", 1, true) then n, ultima = n + 1, m end
+    end
+    return n, ultima
+end
+local n_aviso, texto_aviso = avisos()
+confere(n_aviso == 1 and texto_aviso:find("Bash · Apagar a pasta build", 1, true) ~= nil,
+    "pedindo permissao: avisa na pagina, com a ferramenta (" .. tostring(n_aviso) .. ")")
 
 print("1b. testar a conexao com outra busca em andamento")
 local avisado = false
@@ -254,6 +264,7 @@ print("2. sem mudanca: nao repinta")
 local n = #refreshes
 rodar(61)
 confere(#refreshes == n, "nenhum refresh quando a linha nao muda")
+confere(avisos() == 1, "o mesmo pedido, busca apos busca: avisa uma vez so")
 
 print("3. desligar e ligar a linha")
 p:mudar("overlay", false)
@@ -298,6 +309,39 @@ end
 confere(completos == 1, "10 minutos sem estado novo: 1 refresh completo (" .. completos .. ")")
 painel:onTap()
 confere(pilha[#pilha] == leitor and p.painel == nil, "um toque fecha e volta para o livro")
+
+print("4b2. aviso quando o Claude te chama: um por pedido")
+-- estados que o PC mandaria, entregues direto ao plugin
+local function chega(modo, desde, ferramenta, descricao)
+    p:receber({ codigo = 200, corpo = string.format(
+        '{"v":2,"modo":"%s","desde":%d,"ferramenta":"%s","descricao":"%s","ativos":1,"agora":%d}',
+        modo, desde, ferramenta or "", descricao or "", os.time()) })
+end
+local base_aviso = avisos()
+local t0 = os.time()
+chega("chamando", t0 - 5, "Edit", "main.lua")
+local n2, txt2 = avisos()
+confere(n2 == base_aviso + 1 and txt2:find("Edit · main.lua", 1, true) ~= nil, "pedido novo: avisa de novo")
+chega("chamando", t0 - 5, "Edit", "main.lua")
+confere(avisos() == base_aviso + 1, "o mesmo pedido de novo: nao repete")
+chega("cozinhando", t0 - 3, "Edit", "main.lua")
+confere(avisos() == base_aviso + 1, "trabalhando: nao avisa")
+chega("chamando", t0 - 1, "", "")
+local n3, txt3 = avisos()
+confere(n3 == base_aviso + 2 and txt3:find("esperando sua resposta", 1, true) ~= nil,
+    "pergunta sem ferramenta: avisa com 'esperando sua resposta'")
+p:mudar("aviso_chamando", false)
+chega("chamando", t0, "Bash", "npm test")
+confere(avisos() == base_aviso + 2, "opcao desligada: nao avisa")
+p:mudar("aviso_chamando", true)
+chega("chamando", t0, "Bash", "npm test")
+confere(avisos() == base_aviso + 2, "religada: o pedido que chegou desligada conta como visto")
+p:abrir_painel()
+chega("chamando", t0 + 1, "Bash", "make")
+confere(avisos() == base_aviso + 2, "com o painel aberto: nao avisa (o painel ja mostra)")
+pilha[#pilha]:onTap()
+chega("chamando", t0 + 1, "Bash", "make")
+confere(avisos() == base_aviso + 2, "fechou o painel: o mesmo pedido nao avisa depois")
 
 print("4c. espaco para a linha: so a margem de cima sobe")
 leitor.rolling, leitor.view.view_mode = {}, "page"

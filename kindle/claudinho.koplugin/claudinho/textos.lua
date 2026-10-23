@@ -69,6 +69,8 @@ local TEXTOS = {
         -- menu
         menu_abrir = "Abrir o painel",
         menu_linha = "Mostrar o status no topo da página",
+        menu_aviso = "Avisar quando o Claude te chamar",
+        aviso_chamando = "O Claude está te chamando.\n\n%s",
         menu_painel = "Painel",
         menu_logo_esquerda = "Logo do Kindle à esquerda",
         menu_logo_direita = "Logo do Kindle à direita",
@@ -161,6 +163,8 @@ local TEXTOS = {
 
         menu_abrir = "Open the panel",
         menu_linha = "Show the status at the top of the page",
+        menu_aviso = "Alert me when Claude calls you",
+        aviso_chamando = "Claude is calling you.\n\n%s",
         menu_painel = "Panel",
         menu_logo_esquerda = "Kindle logo on the left",
         menu_logo_direita = "Kindle logo on the right",

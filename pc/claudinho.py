@@ -513,6 +513,9 @@ def derive(state, now, marcas=None):
             "tool_id": s.get("tool_id") if tool else None}
 
 
+DEMO_INICIO = time.time()
+
+
 def demo(mode):
     now = time.time()
     tools = ["Read", "Grep", "Bash", "mcp:notion", "Edit"]
@@ -531,7 +534,9 @@ def demo(mode):
         s["tool_running"] = False
         s["tool_started"] = now - 120
     elif mode == "chamando":
-        s.update(status="waiting", waiting_since=now - 40, last_event=now - 40, tool_started=now - 45,
+        # um pedido so, desde que o agente abriu (como no de verdade): o "desde" nao
+        # muda a cada busca, e o Kindle avisa uma vez
+        s.update(status="waiting", waiting_since=DEMO_INICIO - 40, last_event=now - 40, tool_started=now - 45,
                  tool_name="Bash", tool_desc="Apagar a pasta build")
     elif mode == "prato":
         s.update(status="done", done_at=now - 12, last_event=now - 12)

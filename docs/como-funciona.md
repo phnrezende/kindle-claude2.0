@@ -117,6 +117,8 @@ O que ela mostra sai de `E.linha_topo` (`claudinho/estado.lua`): a bolinha 1 par
 
 Fica centralizada, 4 px abaixo do topo (ou do cabeçalho do livro, se ele estiver ligado), com 20 px de altura no Kindle básico.
 
+**O aviso de permissão**: quando o estado passa a "pedindo permissão" enquanto você lê, o plugin mostra um aviso do KOReader na página (`InfoMessage`, some em 10 s ou com um toque), com a ferramenta e a descrição. Ele avisa uma vez por pedido: o `desde` do estado é a hora em que aquele pedido chegou (o `waiting_since` do hook), então as buscas seguintes do mesmo pedido não repetem, e um pedido novo avisa de novo. Com o painel aberto não avisa, porque o painel já mostra "Te chamando!", e esse pedido conta como visto. Com a linha do topo desligada e o aviso ligado, o plugin continua buscando o estado enquanto você lê.
+
 **O espaço dela**: o mecanismo de texto do KOReader (crengine) só aceita as quatro margens da página (`setPageMargins`), e as linhas são calculadas antes de serem divididas em páginas; por isso não dá para o texto contornar só a linha. Nos livros de texto (EPUB, FB2…), o plugin aumenta a margem de cima até a linha caber, mais 4 px de respiro: com as margens padrão do KOReader, de 15 para 28. Detalhes:
 
 - muda só a margem aplicada (`ReaderTypeset.unscaled_margins`), com o mesmo evento `SetPageMargins` que o KOReader usa. A que o KOReader grava no livro (`configurable.t_page_margin`) continua a sua, e é a ela que o plugin volta quando você desliga a linha;
