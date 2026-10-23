@@ -1,6 +1,8 @@
 MIT License
 
 Copyright (c) 2026 Pedro Henrique Rezende
+Copyright (c) 2026 Guilherme Pessoa (kindle-claude: design do painel, Claudinho
+chef, hooks e contagem de tokens, https://github.com/guithepc/kindle-claude)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +21,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+As fontes em kindle/claudinho.koplugin/fonts/ (Inter Tight e JetBrains Mono)
+seguem as proprias licencas SIL Open Font License, incluidas na mesma pasta.

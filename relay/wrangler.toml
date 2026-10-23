@@ -1,0 +1,19 @@
+# Relay do Claudinho (Cloudflare Workers, plano gratuito).
+# Publicar:  npx wrangler deploy
+# Segredos:  npx wrangler secret put TOKEN_PC
+#            npx wrangler secret put TOKEN_KINDLE
+# (o pc/setup.py faz tudo isso por voce)
+
+name = "claudinho-relay"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "CAIXA"
+class_name = "Caixa"
+
+# Durable Object com SQLite: o unico tipo disponivel no plano gratuito.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Caixa"]

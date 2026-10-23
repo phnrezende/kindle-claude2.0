@@ -1,0 +1,194 @@
+# Claudinho no Kindle 2.0
+
+O status do Claude Code no seu Kindle, como um plugin do **KOReader**: um painel em tela cheia quando você quer acompanhar, e um Claudinho pequeno no canto da página enquanto você lê.
+
+![Painel com o Claudinho cozinhando](docs/img/painel-trabalhando.png)
+
+Inspirado no [kindle-claude](https://github.com/guithepc/kindle-claude), de guithepc: o design do painel, o Claudinho chef em pixel art, os hooks e a contagem de tokens vêm de lá. O que muda:
+
+| | kindle-claude | 2.0 |
+|---|---|---|
+| No Kindle | scriptlet que desenha por cima de tudo | plugin do KOReader |
+| Voltar aos livros | só reiniciando ou pela rota `/parar` | um toque na tela |
+| Enquanto lê | nada | Claudinho no canto da página |
+| Redes | só a mesma Wi-Fi | local **ou** remoto (qualquer rede) |
+| Quem desenha | o PC (Pillow) envia imagens | o Kindle desenha a partir de um JSON de ~400 bytes |
+| PC | macOS/Linux + Pillow | macOS, Linux ou Windows, só Python |
+
+## Enquanto você lê
+
+O overlay fica num canto da página e só é redesenhado quando o estado muda. Ele não pisca a cada virada de página, porque faz parte do desenho do próprio leitor.
+
+![Overlay na leitura: trabalhando, pedindo aprovação, descansando](docs/img/leitura.png)
+
+![Estados do overlay](docs/img/overlay-estados.png)
+
+Da esquerda para a direita: trabalhando, pedindo aprovação, terminou, descansando e sem sinal do PC.
+
+O estado "pedindo aprovação" inverte a caixa (fundo preto), para chamar a atenção de longe sem precisar de animação.
+
+## O painel
+
+**Claudinho → Abrir o painel**, no menu do KOReader (ou um gesto que você escolher). Um toque em qualquer lugar volta para o livro ou a biblioteca.
+
+| Trabalhando | Pedindo aprovação | Pronto | Descansando |
+|:-:|:-:|:-:|:-:|
+| ![](docs/img/painel-trabalhando.png) | ![](docs/img/painel-aprovacao.png) | ![](docs/img/painel-pronto.png) | ![](docs/img/painel-descansando.png) |
+
+O painel mostra:
+
+- o que o Claude está fazendo agora e as últimas ferramentas;
+- o % usado da sessão de 5 h e da semana, com a hora em que cada um zera;
+- os tokens de hoje, da última hora e a média diária;
+- o Claudinho chef animado, mas só no retângulo dele, para o resto da tela e-ink ficar parado.
+
+Com vários agentes rodando, aparece o mais urgente: pedindo permissão > trabalhando > terminou > descansando.
+
+## Como funciona
+
+```mermaid
+flowchart LR
+  A[Claude Code<br/>hooks + statusLine] --> B[pc/data/*.json]
+  H[~/.claude/projects<br/>históricos] --> C
+  B --> C[pc/claudinho.py<br/>monta o estado]
+  C -->|modo local: HTTP na Wi-Fi| K[Kindle<br/>plugin do KOReader]
+  C -->|modo remoto: HTTPS| R[relay<br/>Cloudflare Worker] -->|HTTPS| K
+```
+
+1. Os **hooks** do Claude Code gravam o que cada sessão está fazendo; a **statusLine** guarda o % de uso.
+2. O **agente** (`pc/claudinho.py`) junta tudo num JSON pequeno, o "estado".
+3. **Modo local:** o agente responde na rede de casa. **Modo remoto:** o agente envia o estado para um relay gratuito na Cloudflare, e o Kindle lê de lá, de qualquer rede.
+4. O **plugin** busca o estado a cada 60 s lendo (30 s com o painel aberto), num subprocesso para a leitura nunca travar. Quando nada mudou, o servidor responde só "304, igual", sem conteúdo.
+
+Detalhes em [docs/como-funciona.md](docs/como-funciona.md).
+
+## Instalação
+
+### O que você precisa
+
+- **Kindle com jailbreak e KOReader.** Guias: [jailbreak](https://kindlemodding.org/jailbreaking/) e [KOReader](https://kindlemodding.org/jailbreaking/whats-next/getting-koreader/) no Kindle Modding. Feito para o Kindle básico de 10ª geração (600×800), mas o painel se ajusta a outras telas.
+- **Computador** com Python 3.9+ e o Claude Code. Não precisa instalar nenhuma biblioteca.
+- Para o **modo remoto:** uma conta gratuita na Cloudflare e o Node.js (só para publicar o relay uma vez).
+
+### 1. No computador
+
+```sh
+git clone https://github.com/phnrezende/kindle-claude2.0.git
+cd kindle-claude2.0
+python3 pc/setup.py
+```
+
+O assistente:
+
+1. liga os hooks e a statusLine no `~/.claude/settings.json` (com backup, e mantendo a sua statusLine antiga);
+2. pergunta **local ou remoto**;
+3. no remoto, publica o relay na sua conta Cloudflare e testa;
+4. grava `pc/config.json` e `kindle/claudinho.koplugin/config.lua`.
+
+Depois, deixe o agente rodando:
+
+```sh
+python3 pc/claudinho.py
+```
+
+Reinicie as sessões do Claude Code que já estavam abertas, para elas passarem a mandar eventos.
+
+Quer trocar de modo depois? `python3 pc/setup.py modo`. Passo a passo do remoto em [docs/remoto.md](docs/remoto.md).
+
+### 2. No Kindle
+
+1. Ligue o Kindle no cabo.
+2. Copie a pasta `kindle/claudinho.koplugin` (já com o `config.lua` que o setup gerou) para `koreader/plugins/`.
+3. Ejete e abra o KOReader. O menu **Claudinho (Claude Code)** aparece em **Ferramentas**.
+4. Para conferir: **Claudinho → Conexão → Testar a conexão agora**.
+
+Também dá para configurar tudo pelo menu, sem o `config.lua`: **Conexão → Endereço** e **Token**.
+
+### Testar sem o Kindle
+
+O KOReader roda no computador (ou numa máquina virtual Linux), e o agente tem dados de demonstração:
+
+```sh
+python3 pc/claudinho.py --demo chamando
+```
+
+Guia completo em [docs/emulador.md](docs/emulador.md).
+
+## No dia a dia
+
+| Quero… | Como |
+|---|---|
+| Ver o painel | Menu → Ferramentas → Claudinho → Abrir o painel |
+| Voltar aos livros | tocar em qualquer lugar do painel |
+| Abrir com um gesto | Configurações → Toques e gestos → Gerenciador de gestos → escolha um gesto → Geral → **Claudinho: abrir o painel** |
+| Ligar/desligar o overlay | menu Claudinho → Overlay, ou o gesto **Claudinho: ligar/desligar o overlay** |
+| Mudar o canto ou o tamanho | Claudinho → Overlay na leitura → Canto / Tamanho |
+| Ler sem distração quando o Claude está parado | Overlay → Esconder quando o Claude estiver parado |
+| Painel com o logo do Kindle do outro lado | Claudinho → Painel → Logo do Kindle à direita |
+
+Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel). Deixe-o no carregador se for usar como painel de mesa.
+
+## Configurações
+
+| Onde | Opção | Padrão |
+|---|---|---|
+| Overlay na leitura | mostrar, canto, tamanho (mini/pequeno/médio) | ligado, superior direito, pequeno |
+| | esconder quando parado | não |
+| | animar (troca o quadro a cada busca) | não |
+| Painel | logo do Kindle à esquerda/direita | esquerda |
+| | animar o mascote | sim |
+| | não deixar o Kindle dormir | sim |
+| Atualizar a cada | lendo / com o painel aberto | 60 s / 30 s |
+| Conexão | local ou remota, endereço, token | do `config.lua` |
+
+No computador (`pc/config.json`, escrito pelo setup): `modo`, `porta` (8787), `token`, `relay_url`, `token_pc`.
+
+## Estrutura
+
+```
+kindle-claude2.0/
+├── pc/
+│   ├── setup.py             assistente: hooks + modo local/remoto
+│   ├── claudinho.py         agente: monta o estado e serve (local) ou envia (remoto)
+│   ├── hook.py              hook do Claude Code (uma entrada por sessão)
+│   └── statusline.py        guarda o % de uso e repassa a sua statusLine
+├── relay/
+│   ├── worker.js            Cloudflare Worker + Durable Object (plano gratuito)
+│   ├── wrangler.toml
+│   └── servidor_teste.mjs   o relay rodando localmente no Node, para testes
+├── kindle/claudinho.koplugin/
+│   ├── main.lua             plugin: menu, overlay, buscas, ciclo de vida
+│   ├── claudinho/           painel, desenho, estado, busca, json, sprites
+│   └── fonts/               Inter Tight e JetBrains Mono (estáticas, OFL)
+├── tools/
+│   ├── harness/             roda o desenho do plugin fora do Kindle + testes
+│   ├── gerar_sprites.py     design/sprites.json -> sprites.lua
+│   └── gerar_fontes.py      fontes variáveis -> pesos estáticos
+├── design/                  sprites e pixel art do Claudinho chef (do original)
+└── docs/
+```
+
+## Limitações
+
+- Só enxerga o Claude Code rodando no computador do agente. Conversas no app do Claude e agentes em outras máquinas não aparecem.
+- O % de uso só existe nos planos Pro/Max, e aparece depois da primeira resposta da sessão.
+- O total de tokens inclui leitura de cache, por isso fica alto.
+- No modo remoto, o estado passa pela sua conta Cloudflare: nomes de ferramentas, de arquivos e do projeto. Veja o que é enviado em [docs/remoto.md](docs/remoto.md#o-que-sai-do-seu-pc).
+- Precisa do KOReader. Livros com DRM da Amazon não abrem nele.
+- O overlay pode cobrir um pedacinho do texto em margens apertadas. Aumente a margem superior do livro ou escolha outro canto.
+
+## Situação
+
+O desenho do painel e do overlay foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, comparado ao render do original. O ciclo completo (agente → relay → plugin) passou nos testes automatizados com um KOReader simulado. **Ainda falta testar no emulador do KOReader e no aparelho.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
+
+## Créditos
+
+- Design do painel, Claudinho chef, hooks e contagem de tokens: [kindle-claude](https://github.com/guithepc/kindle-claude), de Guilherme Pessoa (MIT).
+- Fontes [Inter Tight](https://fonts.google.com/specimen/Inter+Tight) e [JetBrains Mono](https://www.jetbrains.com/lp/mono/), licença OFL.
+- [KOReader](https://github.com/koreader/koreader) e o [Kindle Modding Wiki](https://kindlemodding.org).
+
+> Projeto pessoal, sem afiliação com a Anthropic. O Claudinho é fan art inspirada no mascote do Claude Code.
+
+## Licença
+
+[MIT](LICENSE).

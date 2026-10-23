@@ -1,0 +1,13 @@
+# gerados em tempo de execucao / com segredos
+pc/data/
+pc/config.json
+kindle/claudinho.koplugin/config.lua
+
+# ferramentas
+__pycache__/
+*.pyc
+node_modules/
+relay/.wrangler/
+tools/harness/libs/
+*.pgm
+.DS_Store
