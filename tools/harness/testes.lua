@@ -120,6 +120,25 @@ igual(L.atual(), "pt", "segue o KOReader em portugues")
 _G.G_reader_settings = nil
 L.escolher("pt")
 
+print("dormir nao conta como 'sem sinal'")
+local d4 = { modo = "cozinhando", desde = agora - 5, agora = agora }
+igual(E.interpretar(d4, agora + 3600, { recebido_em = agora, dormiu = 3590 }).modo, "cozinhando",
+    "acordou depois de 1 h dormindo: mostra o ultimo estado ate a proxima busca")
+igual(E.interpretar(d4, agora + 3600, { recebido_em = agora, dormiu = 0 }).modo, "sem_sinal",
+    "1 h acordado sem noticia: sem sinal")
+igual(E.interpretar(d4, agora + 3600, { recebido_em = agora, dormiu = 3590, falhas = 3 }).modo, "sem_sinal",
+    "3 falhas depois de acordar: sem sinal")
+
+print("barra de status")
+igual(E.texto_barra({ grupo = "aprovacao" }), "Claude: TE CHAMANDO!", "pedindo aprovacao")
+igual(E.texto_barra({ grupo = "trabalhando" }), "Claude: cozinhando", "trabalhando")
+igual(E.texto_barra({ grupo = "descansando" }, true), nil, "parado, com 'esconder quando parado': nada")
+igual(E.texto_barra({ grupo = "sem_sinal" }, false), "Claude: sem sinal", "sem sinal")
+igual(E.texto_barra({ grupo = "xyz" }), "Claude: sem sinal", "grupo estranho nao quebra")
+L.escolher("en")
+igual(E.texto_barra({ grupo = "aprovacao" }), "Claude: CALLING YOU!", "em ingles")
+L.escolher("pt")
+
 print("dados estranhos nunca dao erro (o overlay roda a cada pagina)")
 local estranhos = { {}, { 1 }, true, 5, "x", -1, 1e300 }
 local campos = { "modo", "desde", "ferramenta", "descricao", "ativos", "projeto", "antes", "sessao", "semana",

@@ -81,6 +81,21 @@ local TEXTOS = {
         tamanho_3 = "Médio",
         menu_esconder = "Esconder quando o Claude estiver parado",
         menu_animar_overlay = "Animar (gasta mais bateria)",
+        menu_onde = "Onde mostrar",
+        onde_canto = "No canto da página",
+        onde_barra = "Na barra de status (nunca cobre o texto)",
+        aviso_cobre = "O Claudinho no canto está cobrindo o começo das linhas deste livro.\n\n"
+            .. "Para não cobrir: margem %s de pelo menos %d (Margens, no menu de baixo), "
+            .. "ou Claudinho → Overlay na leitura → Onde mostrar → Na barra de status.",
+        margem_cima = "de cima",
+        margem_baixo = "de baixo",
+
+        -- barra de status (modo "na barra")
+        barra_trabalhando = "Claude: cozinhando",
+        barra_aprovacao = "Claude: TE CHAMANDO!",
+        barra_pronto = "Claude: pronto",
+        barra_descansando = "Claude: parado",
+        barra_sem_sinal = "Claude: sem sinal",
         menu_painel = "Painel",
         menu_logo_esquerda = "Logo do Kindle à esquerda",
         menu_logo_direita = "Logo do Kindle à direita",
@@ -185,6 +200,20 @@ local TEXTOS = {
         tamanho_3 = "Medium",
         menu_esconder = "Hide when Claude is idle",
         menu_animar_overlay = "Animate (uses more battery)",
+        menu_onde = "Where to show",
+        onde_canto = "In the page corner",
+        onde_barra = "In the status bar (never covers text)",
+        aviso_cobre = "The Claudinho in the corner is covering the start of the lines in this book.\n\n"
+            .. "To keep it clear: a %s margin of at least %d (Margins, in the bottom menu), "
+            .. "or Claudinho → Reading overlay → Where to show → In the status bar.",
+        margem_cima = "top",
+        margem_baixo = "bottom",
+
+        barra_trabalhando = "Claude: cooking",
+        barra_aprovacao = "Claude: CALLING YOU!",
+        barra_pronto = "Claude: done",
+        barra_descansando = "Claude: idle",
+        barra_sem_sinal = "Claude: no signal",
         menu_painel = "Panel",
         menu_logo_esquerda = "Kindle logo on the left",
         menu_logo_direita = "Kindle logo on the right",

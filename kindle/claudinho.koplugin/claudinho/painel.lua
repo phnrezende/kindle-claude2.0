@@ -4,10 +4,12 @@ O painel em tela cheia, igual ao do kindle-claude, dentro do KOReader.
 Toque em qualquer lugar (ou o botao Voltar) fecha e volta para os livros.
 O painel e desenhado deitado e girado para a tela em pe, como no original.
 Atualizacoes:
-  - estado novo do PC: redesenha tudo (refresh completo quando o modo muda
-    e a cada 10 trocas, para limpar fantasmas do e-ink)
+  - estado novo do PC: redesenha tudo (refresh completo quando o modo muda)
   - a cada minuto: so a coluna da esquerda (relogio e "ha X min")
   - animacao: so o retangulo do mascote
+  - a cada 10 trocas (estados novos e minutos), um refresh completo limpa os
+    fantasmas do e-ink. Conta os minutos tambem: num estado parado nao chega
+    estado novo, mas a animacao continua deixando fantasma.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -141,7 +143,13 @@ function Painel:minuto()
     local r = { x = 0, y = 0, w = px(300), h = self.ch }
     local dest = self:copiar(r)
     self.trocas = self.trocas + 1
-    UIManager:setDirty(self, function() return "ui", dest end)
+    if self.trocas >= TROCAS_ATE_LIMPAR then
+        -- sem estado novo ha um tempo (Claude parado, painel na mesa): limpa a tela toda
+        self.trocas = 0
+        UIManager:setDirty(self, function() return "full", self.dimen end)
+    else
+        UIManager:setDirty(self, function() return "ui", dest end)
+    end
     self:agendar_minuto()
 end
 

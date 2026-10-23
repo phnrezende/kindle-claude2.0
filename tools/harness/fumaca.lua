@@ -55,9 +55,12 @@ function UIManager:unschedule(f)
     for i = #tarefas, 1, -1 do if tarefas[i].f == f then table.remove(tarefas, i) end end
 end
 function UIManager:show(w)
+    if w.mensagem then return end          -- InfoMessage: fica registrada em `mensagens`
     pilha[#pilha + 1] = w
     if w.onShow then w:onShow() end
 end
+local eventos = {}
+function UIManager:broadcastEvent(ev) eventos[#eventos + 1] = ev end
 function UIManager:close(w)
     for i = #pilha, 1, -1 do
         if pilha[i] == w then table.remove(pilha, i) end
@@ -96,8 +99,16 @@ function InputContainer:_init() self.ges_events, self.key_events = {}, {} end
 package.preload["ui/widget/container/inputcontainer"] = function() return InputContainer end
 package.preload["ui/widget/container/widgetcontainer"] = function() return Widget:extend{} end
 package.preload["ui/gesturerange"] = function() return { new = function(_, o) return o end } end
+local mensagens = {}
 package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, o) print("  [mensagem] " .. o.text:gsub("\n", " | ")); return {} end }
+    return { new = function(_, o)
+        mensagens[#mensagens + 1] = o.text
+        print("  [mensagem] " .. o.text:gsub("\n", " | "))
+        return { mensagem = true }
+    end }
+end
+package.preload["ui/event"] = function()
+    return { new = function(_, nome, ...) return { name = nome, args = { ... } } end }
 end
 package.preload["ui/widget/notification"] = function()
     return { SOURCE_ALWAYS_SHOW = 0x8000, notify = function(_, t) print("  [aviso] " .. t) end }
@@ -111,8 +122,12 @@ end
 package.preload["pluginshare"] = function() return {} end
 package.preload["datastorage"] = function() return { getSettingsDir = function() return "/tmp" end } end
 package.preload["luasettings"] = function()
-    local S = {}
-    function S:open() return setmetatable({ d = {} }, { __index = S }) end
+    -- como no KOReader, o mesmo arquivo aberto de novo traz o que foi gravado
+    local S, arquivos = {}, {}
+    function S:open(caminho)
+        arquivos[caminho] = arquivos[caminho] or {}
+        return setmetatable({ d = arquivos[caminho] }, { __index = S })
+    end
     function S:readSetting(k) return self.d[k] end
     function S:saveSetting(k, v) self.d[k] = v end
     function S:delSetting(k) self.d[k] = nil end
@@ -163,7 +178,17 @@ local leitor = {
     menu = { registerToMainMenu = function(_, p) menu_registrado = p end },
     view = {
         footer_visible = true,
-        footer = { getHeight = function() return 30 end },
+        footer = {
+            getHeight = function() return 30 end,
+            -- o "conteudo externo" do rodape do KOReader (ReaderFooter)
+            conteudo = {},
+            addAdditionalFooterContent = function(self, f) table.insert(self.conteudo, f) end,
+            removeAdditionalFooterContent = function(self, f)
+                for i, v in ipairs(self.conteudo) do
+                    if v == f then table.remove(self.conteudo, i) return end
+                end
+            end,
+        },
         registerViewModule = function(self, nome, w) self.modulo = w end,
     },
     document = {},
@@ -243,8 +268,53 @@ confere(animou, "animacao atualiza so a regiao do mascote")
 tela:fill(BB.COLOR_WHITE)
 painel:paintTo(tela, 0, 0)
 H.salvar_pgm(tela, SAIDA .. "/painel.pgm")
+
+print("4b. painel parado: limpa os fantasmas mesmo sem estado novo")
+painel.trocas = 0
+local antes_min = #refreshes
+for _ = 1, 10 do painel:minuto() end
+local completos = 0
+for i = antes_min + 1, #refreshes do
+    local f = refreshes[i]
+    if f.w == painel and f.tipo == "full" then completos = completos + 1 end
+end
+confere(completos == 1, "10 minutos sem estado novo: 1 refresh completo (" .. completos .. ")")
 painel:onTap()
 confere(pilha[#pilha] == leitor and p.painel == nil, "um toque fecha e volta para o livro")
+
+print("4c. na barra de status")
+local footer = leitor.view.footer
+p:mudar("overlay_onde", "barra")
+confere(#footer.conteudo == 1, "o texto do Claudinho entrou na barra de status")
+confere(footer.conteudo[1]() == "Claude: TE CHAMANDO!", "texto da barra: " .. tostring(footer.conteudo[1]()))
+confere(p:overlay_alvo() == false, "e o Claudinho some do canto")
+local pediu = false
+for _, ev in ipairs(eventos) do if ev.name == "RefreshAdditionalContent" then pediu = true end end
+confere(pediu, "pede para o rodape redesenhar")
+p:mudar("overlay_onde", "canto")
+confere(#footer.conteudo == 0 and p:overlay_alvo() == true, "de volta ao canto, sai da barra")
+
+print("4d. aviso quando o Claudinho cobre o texto")
+leitor.rolling, leitor.view.view_mode = {}, "page"
+leitor.document.getHeaderHeight = function() return 0 end
+leitor.typeset = { unscaled_margins = { 10, 15, 10, 15 } }     -- as margens padrao do KOReader
+local qual, valor = p:margem_necessaria()
+confere(qual == "cima" and valor == 66, "margem de cima 15: cobre; pede 66 (" .. tostring(valor) .. ")")
+local n_msg = #mensagens
+p:avisar_margem()
+confere(#mensagens == n_msg + 1 and mensagens[#mensagens]:find("66") ~= nil, "avisa, com a margem que resolve")
+p:avisar_margem()
+confere(#mensagens == n_msg + 1, "e nao repete o mesmo aviso")
+leitor.typeset.unscaled_margins = { 10, 70, 10, 15 }
+confere(p:margem_necessaria() == nil, "margem de cima 70: nao cobre")
+p:mudar("overlay_canto", "inferior_esquerdo")
+local qual2, valor2 = p:margem_necessaria()
+confere(qual2 == "baixo" and valor2 == 66, "embaixo, margem de baixo 15: cobre (" .. tostring(valor2) .. ")")
+p:mudar("overlay_canto", "superior_direito")
+p:mudar("overlay_onde", "barra")
+confere(p:margem_necessaria() == nil, "na barra de status nunca cobre")
+p:mudar("overlay_onde", "canto")
+leitor.rolling, leitor.typeset = nil, nil
 
 print("5. PC some")
 p.settings:saveSetting("url", "http://127.0.0.1:1/estado.json")
@@ -267,10 +337,38 @@ E.interpretar = original
 confere(ok_painel and p.painel == nil, "o painel abre (com o minimo) e fecha")
 confere(ok_pagina, "o livro continua sendo desenhado")
 confere(ok_busca, "a busca e a atualizacao seguem sem erro")
+p.overlay_pintado = nil
 pagina()
-confere(true, "com o erro corrigido, o overlay volta")
+confere(p.overlay_pintado ~= nil, "com o erro corrigido, o overlay volta")
+
+print("7. Kindle: o protetor de tela volta mesmo se o KOReader fechar com o painel aberto")
+local executar = os.execute
+local lipc = {}
+os.execute = function(c)
+    if tostring(c):find("lipc") then lipc[#lipc + 1] = c return 0 end
+    return executar(c)
+end
+Device.isKindle = function() return true end
+p:abrir_painel()
+confere(lipc[#lipc] and lipc[#lipc]:find("preventScreenSaver 1") and p.settings:readSetting("tela_acordada") == true,
+    "painel aberto: Kindle acordado, e a marca gravada")
+pilha[#pilha]:onTap()
+confere(lipc[#lipc]:find("preventScreenSaver 0") and p.settings:readSetting("tela_acordada") == nil,
+    "painel fechado: protetor de tela de volta, marca apagada")
+p.settings:saveSetting("tela_acordada", true)       -- como se o KOReader travasse com o painel aberto
+local antes_lipc = #lipc
+local Claudinho2 = dofile(H.PLUGIN .. "main.lua")   -- o KOReader abre de novo
+Claudinho2.path = H.PLUGIN:gsub("/$", "")
+local p2 = Claudinho2:new{ ui = leitor }
+confere(#lipc == antes_lipc + 1 and lipc[#lipc]:find("preventScreenSaver 0") ~= nil
+    and p2.settings:readSetting("tela_acordada") == nil, "no inicio seguinte, devolve o protetor de tela")
+os.execute = executar
+Device.isKindle = function() return false end
+p2:onCloseWidget()
 
 p:onCloseWidget()
-confere(#tarefas == 0 or true, "fechou")
+local agendada = false
+for _, t in ipairs(tarefas) do if t.f == p.tarefa then agendada = true end end
+confere(p.fechado and not agendada, "fechou: nenhuma busca agendada")
 print(falhas == 0 and "TUDO CERTO" or (falhas .. " FALHA(S)"))
 os.exit(falhas == 0 and 0 or 1)

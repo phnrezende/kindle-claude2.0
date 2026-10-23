@@ -127,10 +127,13 @@ Monta o que mostrar.
 
 @param dados tabela do JSON do PC (ou nil se nunca chegou nada)
 @param agora os.time() do Kindle
-@param info { recebido_em, desvio, falhas } da ultima leitura
+@param info { recebido_em, desvio, falhas, dormiu } da ultima leitura
    recebido_em: os.time() do Kindle na ultima leitura que deu certo
    desvio: relogio do Kindle menos o do PC (ver E.desvio)
    falhas: leituras seguidas que falharam
+   dormiu: segundos que o Kindle passou dormindo desde essa leitura. Nao contam
+     para o "sem sinal": ao acordar, a pagina mostra o ultimo estado ate a
+     proxima busca, em vez de piscar "sem sinal" a cada despertar.
 O "ha X min" e calculado no relogio do PC, entao um Kindle com a hora errada
 nao mostra "ha 3 h" a toa.
 ]]
@@ -140,8 +143,9 @@ function E.interpretar(dados, agora, info)
     local modo = E.GRUPO[d.modo] and d.modo ~= "sem_sinal" and d.modo or "descansando"
     local agora_pc = agora - (info.desvio or 0)
     local idade = info.recebido_em and (agora - info.recebido_em) or nil
+    local acordado = idade and (idade - math.max(0, tonumber(info.dormiu) or 0)) or nil
     local sem_sinal = dados == nil
-        or (idade and idade > E.SEM_SINAL_APOS)
+        or (acordado and acordado > E.SEM_SINAL_APOS)
         or (info.falhas or 0) >= 3
     local ha = (tonumber(d.desde) or 0) > 0 and (agora_pc - tonumber(d.desde)) or nil
     if sem_sinal then
@@ -193,6 +197,16 @@ function E.interpretar(dados, agora, info)
         rev = texto(d.rev),
         idioma = L.atual(),
     }
+end
+
+local GRUPOS = { trabalhando = true, aprovacao = true, pronto = true, descansando = true, sem_sinal = true }
+
+--- Texto curto para a barra de status do KOReader (modo "na barra de status"),
+--- ou nil para nao mostrar nada. `so_ativo`: esconde quando o Claude esta parado.
+function E.texto_barra(v, so_ativo)
+    local g = type(v) == "table" and GRUPOS[v.grupo] and v.grupo or "sem_sinal"
+    if so_ativo and (g == "descansando" or g == "sem_sinal") then return nil end
+    return L.t("barra_" .. g)
 end
 
 --- "qui 22/10" (ou "Thu Oct 22") e "13:12" com o relogio do Kindle.
