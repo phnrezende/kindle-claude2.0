@@ -6,7 +6,7 @@ O desenho e a lógica do plugin rodam fora do Kindle, num LuaJIT puro, com o Bli
 
 - LuaJIT (`apt install luajit`, ou compile de https://github.com/LuaJIT/LuaJIT);
 - os fontes do [koreader](https://github.com/koreader/koreader) e do [koreader-base](https://github.com/koreader/koreader-base) clonados;
-- a `libfreetype.so.6` do sistema (o `boot.lua` cria o link em `libs/`, na pasta onde você roda).
+- a `libfreetype.so.6` do sistema (o `boot.lua` procura nos lugares de costume e cria o link em `libs/`, na pasta onde você roda; em outro lugar, defina `FREETYPE=caminho/da/libfreetype.so.6`).
 
 ```sh
 # lado do PC (so Python): hooks, privacidade das descricoes, tokens, setup e servidor
@@ -27,7 +27,9 @@ luajit tools/harness/imagens.lua /tmp        # em portugues
 luajit tools/harness/imagens.lua /tmp en     # em ingles
 ```
 
-O `fumaca.lua` confere: menu registrado, overlay no ReaderView, leitura em subprocesso, refresh só do cantinho, overlay acima da barra de status, painel girado, animação só na região do mascote, toque fecha, e "sem sinal" depois de 3 falhas.
+O `fumaca.lua` confere: menu registrado, overlay no ReaderView, leitura em subprocesso, refresh só do cantinho, overlay acima da barra de status, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, o modo "na barra de status", o aviso de margem, "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
+
+O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
 
 ## Regerar sprites e fontes
 

@@ -26,6 +26,8 @@ Da esquerda para a direita: trabalhando, pedindo aprovação, terminou, descansa
 
 O estado "pedindo aprovação" inverte a caixa (fundo preto), para chamar a atenção de longe sem precisar de animação.
 
+Com as margens padrão do KOReader, o Claudinho no canto cobre o fim das primeiras linhas da página. O plugin avisa uma vez e diz a margem que resolve. Se preferir não mexer nas margens, **Claudinho → Overlay na leitura → Onde mostrar → Na barra de status** troca o desenho por uma palavra na barra de status do KOReader ("Claude: TE CHAMANDO!"), que nunca cobre o texto.
+
 ## O painel
 
 **Claudinho → Abrir o painel**, no menu do KOReader (ou um gesto que você escolher). Um toque em qualquer lugar volta para o livro ou a biblioteca.
@@ -84,9 +86,11 @@ python3 pc/setup.py
 
 O assistente:
 
-1. liga os hooks e a statusLine no `~/.claude/settings.json` (com backup, e mantendo a sua statusLine antiga);
+1. liga os hooks e a statusLine no `~/.claude/settings.json` (ou no da pasta de `CLAUDE_CONFIG_DIR`, se você usa essa variável), com backup, e mantendo a sua statusLine antiga;
 2. pergunta o IP do computador e a porta (o padrão serve quase sempre) e gera um token;
 3. grava `pc/config.json` e `kindle/claudinho.koplugin/config.lua`.
+
+No Windows, o Claude Code roda os comandos no Git Bash quando ele está instalado, e no PowerShell quando não está. O setup confere qual é o seu caso e grava os comandos no formato certo. Se você instalar o Git Bash depois, rode o setup de novo.
 
 Depois, deixe o agente rodando:
 
@@ -94,9 +98,11 @@ Depois, deixe o agente rodando:
 python3 pc/claudinho.py
 ```
 
+Para ele subir sozinho quando você entra no computador, veja [Deixar o agente sempre ligado](docs/problemas.md#deixar-o-agente-sempre-ligado).
+
 Reinicie as sessões do Claude Code que já estavam abertas, para elas passarem a mandar eventos.
 
-Mudou o IP ou a porta? `python3 pc/setup.py connection` e copie o plugin de novo.
+Mudou o IP ou a porta? `python3 pc/setup.py connection` e copie o plugin de novo. Para trocar o token, `python3 pc/setup.py connection --new-token`.
 
 ### 2. No Kindle
 
@@ -126,6 +132,7 @@ Guia completo em [docs/emulador.md](docs/emulador.md).
 | Abrir com um gesto | Configurações → Toques e gestos → Gerenciador de gestos → escolha um gesto → Geral → **Claudinho: abrir o painel** |
 | Ligar/desligar o overlay | menu Claudinho → Overlay, ou o gesto **Claudinho: ligar/desligar o overlay** |
 | Mudar o canto ou o tamanho | Claudinho → Overlay na leitura → Canto / Tamanho |
+| Não cobrir o texto | Claudinho → Overlay na leitura → Onde mostrar → Na barra de status |
 | Ler sem distração quando o Claude está parado | Overlay → Esconder quando o Claude estiver parado |
 | Painel com o logo do Kindle do outro lado | Claudinho → Painel → Logo do Kindle à direita |
 | Telas em inglês (ou em português) | Claudinho → Idioma |
@@ -136,7 +143,7 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 
 | Onde | Opção | Padrão |
 |---|---|---|
-| Overlay na leitura | mostrar, canto, tamanho (mini/pequeno/médio) | ligado, superior direito, pequeno |
+| Overlay na leitura | mostrar, onde (canto da página ou barra de status), canto, tamanho (mini/pequeno/médio) | ligado, canto, superior direito, pequeno |
 | | esconder quando parado | não |
 | | animar (troca o quadro a cada busca) | não |
 | Painel | logo do Kindle à esquerda/direita | esquerda |
@@ -146,7 +153,7 @@ Com o painel aberto, o Kindle não dorme (dá para desligar isso no menu Painel)
 | Conexão | endereço, token | do `config.lua` |
 | Idioma | automático, português (Brasil) ou inglês | automático (o do KOReader) |
 
-No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`.
+No computador (`pc/config.json`, escrito pelo setup): `porta` (8787) e `token`. Opcional: `host`, o IP em que o agente responde (por exemplo, o da rede de casa). Sem ele, responde em todas as redes em que o computador estiver.
 
 ## Estrutura
 
@@ -156,7 +163,8 @@ kindle-claude2.0/
 │   ├── setup.py             assistente: hooks + conexão
 │   ├── claudinho.py         agente: monta o estado e serve para o Kindle
 │   ├── hook.py              hook do Claude Code (uma entrada por sessão)
-│   └── statusline.py        guarda o % de uso e repassa a sua statusLine
+│   ├── statusline.py        guarda o % de uso e repassa a sua statusLine
+│   └── shells.py            qual shell o Claude Code usa (bash, Git Bash ou PowerShell)
 ├── kindle/claudinho.koplugin/
 │   ├── main.lua             plugin: menu, overlay, buscas, ciclo de vida
 │   ├── claudinho/           painel, desenho, estado, textos (pt/en), busca, json, sprites
@@ -177,13 +185,14 @@ kindle-claude2.0/
 - O total de tokens inclui leitura de cache, por isso fica alto.
 - Só funciona com o Kindle e o PC na mesma rede. Wi-Fi de visitante ou corporativa que isola os aparelhos bloqueia a conexão.
 - O estado vai sem criptografia (HTTP) pela rede de casa: nomes de ferramentas, de arquivos, do projeto e a descrição curta do comando. Comandos inteiros, prompts, campos de ferramentas MCP e conteúdo de arquivos não saem do PC. Veja [docs/como-funciona.md](docs/como-funciona.md#o-que-sai-do-pc).
-- Depois que você aprova uma permissão, o Kindle continua "Te chamando!" até a ferramenta terminar, porque o Claude Code não avisa quando a permissão é dada.
+- O token também vai em texto puro, na mesma requisição: quem consegue ver o tráfego da rede vê o estado e o token. Ele protege contra quem só está na rede, não contra quem a escuta. Troque com `python3 pc/setup.py connection --new-token` se desconfiar.
+- Depois que você aprova uma permissão, o Kindle continua "Te chamando!" até a ferramenta terminar, porque o Claude Code não avisa quando a permissão é dada. Quando você recusa ou aperta Esc, o agente percebe pelo histórico da sessão, e o Kindle sai do "Te chamando!" na busca seguinte.
 - Precisa do KOReader. Livros com DRM da Amazon não abrem nele.
-- O overlay pode cobrir um pedacinho do texto em margens apertadas. Aumente a margem superior do livro ou escolha outro canto.
+- Com as margens padrão, o Claudinho no canto cobre o fim das primeiras (ou das últimas) linhas. Aumente a margem que o aviso indicar, ou use a barra de status.
 
 ## Situação
 
-O desenho do painel e do overlay foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, comparado ao render do original. O ciclo completo (agente → plugin) passou nos testes automatizados com um KOReader simulado. **Ainda falta testar no emulador do KOReader e no aparelho.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
+O desenho do painel e do overlay foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, comparado ao render do original. O ciclo completo (agente → plugin) passou nos testes automatizados com um KOReader simulado. **Ainda falta testar no emulador do KOReader, no aparelho e, no Windows, os comandos gravados para o PowerShell.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
 
 ## Créditos
 
