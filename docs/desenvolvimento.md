@@ -30,9 +30,16 @@ luajit tools/harness/imagens.lua /tmp en     # em ingles
 
 O `fumaca.lua` confere: menu registrado, endereço e token pelo menu (como no plugin do zip, sem `config.lua`), linha do topo no ReaderView (centralizada, pílula preta pedindo permissão), leitura em subprocesso, refresh só da faixa da linha, o toque na linha abrindo o painel (e o toque fora dela seguindo para o menu), o aviso de permissão (uma vez por pedido, nada com a opção desligada ou com o painel aberto), a busca (o intervalo de cada estado no adaptativo, os tempos fixos como escolha única no menu, e a próxima busca agendada com o estado novo), a pausa (nenhuma busca agendada, nem ao acordar; sem linha, margem, aviso nem painel; o gesto retoma, e pausar com o painel aberto o fecha), desligar e ligar a linha, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, a margem de cima reservada (sem mexer na que o livro grava, abaixo do cabeçalho do livro, e de volta ao desligar), "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
 
-O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
+O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. No Windows, ele também roda de verdade, numa pasta com espaço e acento, os hooks e a statusLine gravados pelo setup, no PowerShell e no Git Bash, como o Claude Code rodaria; e confere o `setup.py autostart`: o atalho na pasta Inicializar (`CLAUDINHO_STARTUP_DIR` troca a pasta no teste) abre o agente no `pythonw`, que responde e escreve o log.
 
 O uso da conta é testado contra uma Anthropic de mentira (um servidor local; `CLAUDINHO_USO_URL` e `CLAUDINHO_TOKEN_URL` trocam os endereços), com um `.credentials.json` falso no HOME de teste: token válido (só consulta), vencido (renova como o Claude Code, grava só o `claudeAiOauth`, faz backup, mantém as permissões), recusado antes de vencer (renova e tenta de novo), renovação recusada (volta para a statusLine e pede `/login`), sem login e com `"uso_da_conta": false`.
+
+## Testes no GitHub
+
+O workflow `.github/workflows/testes.yml` roda a cada push na `main` e a cada pull request:
+
+- `testes_pc.py` no Linux (Python 3.9, a menor versão suportada, e 3.13), no Windows e no macOS;
+- `testes.lua`, `fumaca.lua` (contra o agente em `--demo chamando`) e `imagens.lua` (pt e en) no Linux, com o LuaJIT e os fontes do KOReader na versão de `KOREADER_VERSAO` (a mesma do emulador testado; o koreader-base vem como submódulo dela). Para testar com uma versão nova do KOReader, troque essa variável.
 
 ## Publicar uma versão
 

@@ -1,5 +1,7 @@
 # Claudinho no Kindle 2.0
 
+[![Testes](https://github.com/phnrezende/kindle-claude2.0/actions/workflows/testes.yml/badge.svg)](https://github.com/phnrezende/kindle-claude2.0/actions/workflows/testes.yml)
+
 O status do Claude Code no seu Kindle, como um plugin do **KOReader**: um painel em tela cheia quando você quer acompanhar, e uma linha discreta no topo da página enquanto você lê.
 
 ![Painel com o Claudinho cozinhando](docs/img/painel-trabalhando.png)
@@ -103,7 +105,9 @@ Depois, deixe o agente rodando:
 python3 pc/claudinho.py
 ```
 
-Para ele subir sozinho quando você entra no computador, veja [Deixar o agente sempre ligado](docs/problemas.md#deixar-o-agente-sempre-ligado).
+Para ele subir sozinho quando você entra no computador: no Windows, `python pc\setup.py autostart` (cria um atalho na pasta Inicializar que abre o agente sem janela, com o log em `pc\data\agente.log`; `autostart remove` desfaz). No Linux e no macOS, veja [Deixar o agente sempre ligado](docs/problemas.md#deixar-o-agente-sempre-ligado).
+
+Na primeira vez que o agente abrir, o Windows pode perguntar se o Python pode aceitar conexões: permita em **redes privadas**, e confira que a sua Wi-Fi de casa está como rede privada.
 
 Reinicie as sessões do Claude Code que já estavam abertas, para elas passarem a mandar eventos.
 
@@ -209,7 +213,7 @@ kindle-claude2.0/
 
 ## Situação
 
-O desenho do painel e da linha do topo foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, e o painel comparado ao render do original. O ciclo completo (agente → plugin) passou nos testes automatizados com um KOReader simulado e no emulador do KOReader para Linux, numa máquina virtual. **Ainda falta testar no aparelho e, no Windows, os comandos gravados para o PowerShell.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
+O desenho do painel e da linha do topo foi conferido rodando o código do plugin com o Blitbuffer e o FreeType reais do KOReader, e o painel comparado ao render do original. O ciclo completo (agente → plugin) passou nos testes automatizados com um KOReader simulado e no emulador do KOReader para Linux, numa máquina virtual, lendo um agente no Windows pela rede de casa. No Windows, os comandos gravados rodam de verdade no PowerShell e no Git Bash, e o início automático abre o agente sem janela. Os testes rodam no GitHub a cada push, no Linux, no Windows e no macOS. **Ainda falta testar no aparelho.** Se algo der errado, veja [docs/problemas.md](docs/problemas.md).
 
 ## Créditos
 

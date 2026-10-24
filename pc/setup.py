@@ -4,6 +4,8 @@
     python3 setup.py               turn on the hooks + statusLine and set up the connection
     python3 setup.py connection    only set up the connection again (IP, port, token)
     python3 setup.py remove        take the hooks and the statusLine out of Claude Code
+    python3 setup.py autostart     Windows: start the agent (hidden) when you log in
+    python3 setup.py autostart remove
 
 Without questions (for scripts):
     python3 setup.py --no-prompt [--ip 192.168.0.10] [--port 8787] [--token X]
@@ -315,10 +317,69 @@ Tip: if this computer's IP changes, reserve a fixed IP for it on your router.
 The Kindle screens can be in English or Portuguese: Claudinho > Language, on the Kindle.""")
 
 
+# ------------------------------------------------------------------ iniciar com o Windows
+
+ATALHO = "Claudinho (Kindle).lnk"
+
+
+def pasta_inicializar():
+    """A pasta Inicializar (shell:startup) do usuario."""
+    outra = os.environ.get("CLAUDINHO_STARTUP_DIR")        # para os testes
+    if outra:
+        return outra
+    return os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+
+
+def autostart(remover=False):
+    """Windows: um atalho na pasta Inicializar que abre o agente sem janela (pythonw),
+    com o log em pc/data/agente.log. No Linux e no macOS, o docs/problemas.md explica."""
+    if os.name != "nt":
+        print("On Linux and macOS, see 'Keep the agent always on' in docs/problemas.md"
+              " (a systemd user service or a launchd agent).")
+        return
+    atalho = os.path.join(pasta_inicializar(), ATALHO)
+    if remover:
+        if os.path.exists(atalho):
+            os.remove(atalho)
+            print(f"Removed: {atalho}\nThe agent won't start with Windows anymore.")
+        else:
+            print("There was no Claudinho shortcut in the Startup folder.")
+        return
+    pythonw = os.path.join(os.path.dirname(PY), "pythonw.exe")
+    if not os.path.isfile(pythonw):
+        pythonw = PY                                       # sem pythonw: abre com janela
+    os.makedirs(DATA, exist_ok=True)
+    os.makedirs(os.path.dirname(atalho), exist_ok=True)
+    agente = os.path.join(BASE, "claudinho.py")
+    log_arq = os.path.join(DATA, "agente.log")
+    # os valores vao por variaveis de ambiente: nada de aspas dentro do comando
+    script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CL_LNK); "
+              "$s.TargetPath = $env:CL_PY; $s.Arguments = $env:CL_ARGS; $s.WorkingDirectory = $env:CL_DIR; "
+              "$s.WindowStyle = 7; $s.Description = 'Claudinho: Claude Code no Kindle'; $s.Save()")
+    import subprocess
+    env = dict(os.environ, CL_LNK=atalho, CL_PY=pythonw, CL_DIR=BASE,
+               CL_ARGS=f'"{agente}" --log "{log_arq}"')
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                       capture_output=True, text=True, env=env)
+    if r.returncode != 0 or not os.path.exists(atalho):
+        sys.exit(f"Couldn't create the shortcut in the Startup folder: {r.stderr.strip() or r.stdout.strip()}")
+    print(f"""Created: {atalho}
+The agent will start by itself (no window) when you log in to Windows.
+Its messages go to {log_arq}.
+To start it now without logging in again, double-click that shortcut.
+To undo: python setup.py autostart remove""")
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        print("Note: CLAUDE_CONFIG_DIR is set in this terminal, but programs started at login won't see it."
+              " Set it as a user environment variable in Windows too.")
+
+
 def main():
     acao = sys.argv[1] if len(sys.argv) > 1 else ""
     if acao in ("remove", "remover"):
         remover_hooks()
+        return
+    if acao == "autostart":
+        autostart(remover=len(sys.argv) > 2 and sys.argv[2] in ("remove", "remover"))
         return
     if acao in ("connection", "conexao", "modo"):
         configurar_conexao()

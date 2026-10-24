@@ -83,7 +83,7 @@ e rode `systemctl --user enable --now claudinho`. O log fica em `journalctl --us
 
 e rode `launchctl load ~/Library/LaunchAgents/com.claudinho.agente.plist`. Na primeira vez, o macOS pode perguntar se o Python pode aceitar conexões: aceite.
 
-**Windows**: aperte Win+R, digite `shell:startup` e crie ali um atalho para `pythonw.exe "C:\caminho\para\kindle-claude2.0\pc\claudinho.py"` (o `pythonw` roda sem janela).
+**Windows**: `python pc\setup.py autostart`. Ele cria o atalho "Claudinho (Kindle)" na pasta Inicializar (Win+R, `shell:startup`), que abre `pythonw.exe pc\claudinho.py --log pc\data\agente.log`: sem janela, com as mensagens no `agente.log`. Para abrir agora sem sair e entrar de novo, dê dois cliques no atalho. Para tirar: `python pc\setup.py autostart remove`. Se você usa `CLAUDE_CONFIG_DIR`, defina-a também como variável de ambiente do usuário no Windows: programas abertos no login não veem a do terminal.
 
 Se você usa `CLAUDE_CONFIG_DIR`, defina a variável também no serviço (`Environment=` no systemd, `EnvironmentVariables` no launchd).
 

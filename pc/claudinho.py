@@ -10,6 +10,7 @@ home network at http://<ip>:<port>/estado.json.
     python3 claudinho.py --demo MODE     fake data (test without Claude Code)
     python3 claudinho.py --state         print the current state and exit
     python3 claudinho.py --port 8787     use another port
+    python3 claudinho.py --log FILE      write the messages to FILE (setup.py autostart uses it)
 
 Demo modes: cozinhando, cebola, pensando, chamando, prato, esperando,
 descansando, varios
@@ -76,11 +77,19 @@ def log(*args):
 
 
 def read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    # no Windows, abrir um arquivo no instante em que o hook ou a statusLine o troca
+    # (os.replace) da PermissionError: tenta de novo, em vez de ler "vazio"
+    for tentativa in range(20):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except PermissionError:
+            if tentativa == 19:
+                return {}
+            time.sleep(0.025)
+        except Exception:
+            return {}
+    return {}
 
 
 def load_config():
@@ -816,6 +825,16 @@ def main():
             sys.exit("Use --port with a number, for example: --port 8787")
         cfg["porta"] = int(porta)
     os.makedirs(DATA, exist_ok=True)
+    tem, arquivo_log = opcao(args, "--log")
+    if tem and arquivo_log:
+        # aberto sem janela (pythonw, pelo atalho de "setup.py autostart"): as mensagens
+        # e os erros vao para o arquivo; passando de 1 MB, o antigo vira .old
+        try:
+            if os.path.getsize(arquivo_log) > 1_000_000:
+                os.replace(arquivo_log, arquivo_log + ".old")
+        except OSError:
+            pass
+        sys.stdout = sys.stderr = open(arquivo_log, "a", encoding="utf-8", buffering=1)
     if not os.path.exists(CONFIG):
         log("No config.json yet. Run python3 setup.py to set things up.")
     elif cfg.get("modo") == "remoto":

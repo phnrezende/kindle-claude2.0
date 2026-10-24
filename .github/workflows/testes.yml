@@ -1,0 +1,77 @@
+# Roda os testes a cada push e pull request:
+# - o lado do PC (tools/testes_pc.py) no Linux, no Windows e no macOS. No Windows,
+#   os comandos gravados rodam de verdade no PowerShell e no Git Bash, e o atalho
+#   de "setup.py autostart" abre o agente;
+# - o plugin (tools/harness) no Linux, com o LuaJIT e os fontes do KOReader na
+#   versao fixada abaixo (a mesma testada no emulador).
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KOREADER_VERSAO: v2026.07.1
+
+jobs:
+  pc:
+    name: PC (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.9" }    # a menor versao suportada
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
+          - { os: macos-latest, python: "3.13" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: testes_pc.py
+        run: python tools/testes_pc.py
+
+  plugin:
+    name: Plugin (LuaJIT + KOReader)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: LuaJIT e FreeType
+        run: sudo apt-get update -q && sudo apt-get install -y -q luajit libfreetype6
+
+      - name: Fontes do KOReader e do koreader-base
+        run: |
+          git clone -q --depth 1 --branch "$KOREADER_VERSAO" https://github.com/koreader/koreader.git "$RUNNER_TEMP/koreader"
+          git -C "$RUNNER_TEMP/koreader" -c advice.detachedHead=false submodule update -q --init --depth 1 base
+          echo "KO=$RUNNER_TEMP/koreader" >> "$GITHUB_ENV"
+          echo "KOBASE=$RUNNER_TEMP/koreader/base" >> "$GITHUB_ENV"
+
+      - name: testes.lua (logica)
+        run: luajit tools/harness/testes.lua
+
+      - name: fumaca.lua (o plugin inteiro, contra o agente em demo)
+        run: |
+          # sem config.json o agente nao pede token: o "x" abaixo e so um valor qualquer
+          python pc/claudinho.py --demo chamando --port 8788 > "$RUNNER_TEMP/agente.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8788/saude >/dev/null && break; sleep 0.5; done
+          mkdir -p "$RUNNER_TEMP/fumaca" && cd "$RUNNER_TEMP/fumaca"
+          luajit "$GITHUB_WORKSPACE/tools/harness/fumaca.lua" http://127.0.0.1:8788/estado.json x "$RUNNER_TEMP/fumaca"
+
+      - name: imagens.lua (painel e linha do topo, pt e en)
+        run: |
+          for idioma in pt en; do
+            mkdir -p "$RUNNER_TEMP/img-$idioma" && cd "$RUNNER_TEMP/img-$idioma"
+            luajit "$GITHUB_WORKSPACE/tools/harness/imagens.lua" "$RUNNER_TEMP/img-$idioma" "$idioma"
+            test "$(ls *.pgm | wc -l)" -ge 8
+          done

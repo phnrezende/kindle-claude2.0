@@ -292,8 +292,8 @@ def ler_sem_parar():
         try:
             with open(arq_sl) as f:
                 json.load(f)
-        except FileNotFoundError:
-            pass
+        except (FileNotFoundError, PermissionError):
+            pass        # Windows: o arquivo no meio da troca (o agente tenta de novo, ver read_json)
         except ValueError:
             ruins[0] += 1
 import threading
@@ -470,6 +470,54 @@ r = subprocess.run(SETUP + ["--no-prompt", "--ip", "127.0.0.1", "--shell", "zsh"
 ok(r.returncode != 0 and "--shell" in r.stderr, "--shell com valor errado da erro claro")
 subprocess.run(SETUP + ["remove"], capture_output=True, text=True, env=env)
 os.remove(settings_path)
+
+if os.name == "nt":
+    print("Windows: os comandos gravados rodam de verdade, no PowerShell e no Git Bash")
+    import shells as _shells
+    # uma pasta com espaco e acento, como C:\Users\Joao Silva\...
+    pasta = os.path.join(tmp, "Pasta com espaço")
+    PC_W = os.path.join(pasta, "pc")
+    shutil.copytree(PC, PC_W, ignore=shutil.ignore_patterns("config.json", "data", "__pycache__"))
+
+    def rodar_gravados(shell, argv):
+        """Roda cada comando gravado no settings.json como o Claude Code rodaria."""
+        st = json.load(open(settings_path))
+        hook_cmd = st["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        pre_cmd = st["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        shutil.rmtree(os.path.join(PC_W, "data"), ignore_errors=True)
+        sid = "sessao-" + shell
+        for cmd, ev in ((hook_cmd, {"hook_event_name": "UserPromptSubmit", "session_id": sid,
+                                    "cwd": r"C:\projetos\meu app", "prompt": "oi"}),
+                        (pre_cmd, {"hook_event_name": "PreToolUse", "session_id": sid,
+                                   "cwd": r"C:\projetos\meu app", "tool_name": "Bash", "tool_use_id": "t1",
+                                   "tool_input": {"command": "npm test", "description": "Rodar os testes"}})):
+            subprocess.run(argv(cmd), input=json.dumps(ev), text=True, capture_output=True, env=env, timeout=60)
+        estado_w = json.load(open(os.path.join(PC_W, "data", "state.json"), encoding="utf-8"))
+        s = estado_w.get("sessions", {}).get(sid, {})
+        ok(s.get("status") == "working" and s.get("tool_name") == "Bash",
+           f"{shell}: os hooks gravados rodam e gravam o estado ({s.get('status')}, {s.get('tool_name')})")
+        sl_cmd = st["statusLine"]["command"]
+        r = subprocess.run(argv(sl_cmd), text=True, capture_output=True, env=env, timeout=60,
+                           input=json.dumps({"model": {"display_name": "Opus"}, "rate_limits": {
+                               "five_hour": {"used_percentage": 40, "resets_at": time.time() + 3600}}}))
+        guardado = json.load(open(os.path.join(PC_W, "data", "statusline.json")))["rate_limits"]
+        ok("5h 40%" in r.stdout and guardado["five_hour"]["used_percentage"] == 40,
+           f"{shell}: a statusLine gravada roda e guarda o % ({r.stdout.strip()!r})")
+
+    setup_w = [sys.executable, "-I", os.path.join(PC_W, "setup.py"), "--no-prompt", "--ip", "127.0.0.1"]
+    subprocess.run(setup_w + ["--shell", "powershell"], capture_output=True, text=True, env=env,
+                   stdin=subprocess.DEVNULL)
+    rodar_gravados("PowerShell", lambda c: ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", c])
+    bash_w = _shells.git_bash()
+    if bash_w:
+        subprocess.run(setup_w + ["--shell", "bash"], capture_output=True, text=True, env=env,
+                       stdin=subprocess.DEVNULL)
+        rodar_gravados("Git Bash", lambda c: [bash_w, "-c", c])
+    else:
+        print("  (sem Git Bash neste Windows: so o PowerShell foi rodado)")
+    subprocess.run([sys.executable, "-I", os.path.join(PC_W, "setup.py"), "remove"], capture_output=True,
+                   text=True, env=env)
+    os.remove(settings_path)
 import setup as _setup  # noqa: E402
 _setup.PY = r"C:\Program Files\Python312\python.exe"
 alvo = r"C:\Users\Joao Silva\kindle-claude2.0\pc\hook.py"
@@ -509,6 +557,68 @@ finally:
     srv.terminate()
     saida = srv.communicate()[0]
 ok("http://127.0.0.1:8796/estado.json" in saida, "e diz esse endereco ao abrir")
+
+
+def espera_saude(porta, segundos=20):
+    fim = time.time() + segundos
+    while time.time() < fim:
+        try:
+            if get(f"http://127.0.0.1:{porta}/saude")[0] == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return False
+
+
+print("agente com --log (como o atalho de 'setup.py autostart' o abre)")
+log_teste = os.path.join(tmp, "agente.log")
+srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--log", log_teste], env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+try:
+    respondeu = espera_saude(8796)
+finally:
+    srv.terminate()
+    tela = srv.communicate()[0]
+escrito = open(log_teste, encoding="utf-8").read() if os.path.exists(log_teste) else ""
+ok(respondeu and "The Kindle reads http://127.0.0.1:8796" in escrito and "The Kindle reads" not in tela,
+   "--log: responde, e as mensagens vao para o arquivo, nao para a tela")
+
+if os.name == "nt":
+    print("Windows: 'setup.py autostart' cria o atalho, e ele abre o agente sem janela")
+    inicializar = os.path.join(tmp, "Startup")
+    env_auto = dict(env, CLAUDINHO_STARTUP_DIR=inicializar)
+    r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "autostart"], capture_output=True,
+                       text=True, env=env_auto)
+    lnk = os.path.join(inicializar, "Claudinho (Kindle).lnk")
+    ok(r.returncode == 0 and os.path.exists(lnk), "atalho criado na pasta Inicializar")
+    ler = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CL_LNK); "
+           "$s.TargetPath; $s.Arguments; $s.WindowStyle")
+    alvo, argumentos, janela = (subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ler],
+                                               capture_output=True, text=True, env=dict(env, CL_LNK=lnk))
+                                .stdout.strip().splitlines() + ["", "", ""])[:3]
+    ok(alvo.lower().endswith("pythonw.exe") and "claudinho.py" in argumentos and "--log" in argumentos,
+       f"o atalho abre o claudinho.py com o pythonw e o --log ({os.path.basename(alvo)})")
+    log_auto = os.path.join(PC, "data", "agente.log")
+    if os.path.exists(log_auto):
+        os.remove(log_auto)
+    # abre pelo atalho, como o Windows faz no login
+    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath $env:CL_LNK"],
+                   env=dict(env, CL_LNK=lnk))
+    respondeu = espera_saude(8796)
+    lista = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like ('*' + $env:CL_PC + '*') }"
+                            " | ForEach-Object { $_.ProcessId.ToString() + ' ' + $_.Name }"],
+                           capture_output=True, text=True, env=dict(env, CL_PC=os.path.join(PC, "claudinho.py")))
+    procs = [l.split(" ", 1) for l in lista.stdout.split("\n") if l.strip()]
+    for pid, _ in procs:
+        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+    escrito = open(log_auto, encoding="utf-8").read() if os.path.exists(log_auto) else ""
+    ok(respondeu and any(n.strip().lower() == "pythonw.exe" for _, n in procs) and "The Kindle reads" in escrito,
+       f"aberto pelo atalho: responde, roda no pythonw (sem janela) e escreve o log ({[n.strip() for _, n in procs]})")
+    r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "autostart", "remove"],
+                       capture_output=True, text=True, env=env_auto)
+    ok(not os.path.exists(lnk) and "Removed" in r.stdout, "'autostart remove' tira o atalho")
 outra = os.path.join(tmp, "outra-config")
 os.makedirs(os.path.join(outra, "projects", "q"))
 with open(os.path.join(outra, "projects", "q", "s.jsonl"), "w") as f:
