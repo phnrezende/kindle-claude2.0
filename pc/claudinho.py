@@ -814,6 +814,11 @@ def opcao(args, *nomes):
 
 
 def main():
+    for saida in (sys.stdout, sys.stderr):
+        # redirecionada (arquivo, outro programa): UTF-8 em qualquer sistema; no Windows o
+        # padrao seria a pagina de codigo (cp1252), que nem tem todos os caracteres
+        if saida is not None and not saida.isatty():
+            saida.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:]
     demo_mode = None
     tem, valor = opcao(args, "--demo")
@@ -828,10 +833,6 @@ def main():
         LOG_STDERR = True
         if USO_LIGADO and not demo_mode:
             atualizar_uso()
-        if not sys.stdout.isatty():
-            # redirecionado (arquivo, outro programa): UTF-8 em qualquer sistema; no
-            # Windows o padrao seria a pagina de codigo, que nao tem todos os caracteres
-            sys.stdout.reconfigure(encoding="utf-8")
         print(json.dumps(montar_estado(demo_mode=demo_mode), ensure_ascii=False, indent=2))
         return
     tem, porta = opcao(args, "--port", "--porta")
