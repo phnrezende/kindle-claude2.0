@@ -410,19 +410,36 @@ ok("Done." in subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py")
 
 srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--demo", "chamando"],
                        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-time.sleep(1.5)
 url = "http://127.0.0.1:8799/estado.json"
+
+
+# direto, sem o proxy do sistema (no macOS do GitHub, ate 127.0.0.1 ia para um proxy)
+_direto = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def espera_saude(porta, segundos=30):
+    """Espera o agente responder (em vez de dormir um tempo fixo)."""
+    fim = time.time() + segundos
+    while time.time() < fim:
+        try:
+            if get(f"http://127.0.0.1:{porta}/saude")[0] == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return False
 
 
 def get(u, headers=None):
     try:
-        with urllib.request.urlopen(urllib.request.Request(u, headers=headers or {}), timeout=5) as resp:
+        with _direto.open(urllib.request.Request(u, headers=headers or {}), timeout=5) as resp:
             return resp.status, resp.headers, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.headers, b""
 
 
 try:
+    ok(espera_saude(8799), "o agente abre e responde")
     ok(get(url)[0] == 401, "sem token: 401")
     ok(get(url + "?token=" + cfg["token"])[0] == 401, "token na URL nao vale mais")
     st, h, corpo = get(url, {"Authorization": "Bearer " + cfg["token"]})
@@ -436,7 +453,7 @@ finally:
 
 srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py"), "--port", "8797"],
                        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-time.sleep(1.5)
+espera_saude(8797)
 srv.terminate()
 saida = srv.communicate()[0]
 ok(saida.find("Counting tokens") >= 0 and saida.find("Counting tokens") < saida.find("The Kindle reads"),
@@ -557,25 +574,12 @@ ok(not {"modo", "relay_url", "token_pc"} & set(novo) and "Remote mode was remove
    "e tira as chaves do modo remoto, avisando")
 srv = subprocess.Popen([sys.executable, "-I", os.path.join(PC, "claudinho.py")], env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-time.sleep(1.5)
 try:
-    ok(get("http://127.0.0.1:8796/saude")[0] == 200, "com \"host\", responde nesse endereco")
+    ok(espera_saude(8796), "com \"host\", responde nesse endereco")
 finally:
     srv.terminate()
     saida = srv.communicate()[0]
 ok("http://127.0.0.1:8796/estado.json" in saida, "e diz esse endereco ao abrir")
-
-
-def espera_saude(porta, segundos=20):
-    fim = time.time() + segundos
-    while time.time() < fim:
-        try:
-            if get(f"http://127.0.0.1:{porta}/saude")[0] == 200:
-                return True
-        except Exception:
-            pass
-        time.sleep(0.3)
-    return False
 
 
 print("agente com --log (como o atalho de 'setup.py autostart' o abre)")

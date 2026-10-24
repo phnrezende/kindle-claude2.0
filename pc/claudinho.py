@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -755,6 +756,16 @@ def ip_local():
         return "127.0.0.1"
 
 
+class ServidorHTTP(ThreadingHTTPServer):
+    """O ThreadingHTTPServer sem o getfqdn() ao abrir: essa consulta de nome nao serve
+    para nada aqui e pode levar segundos (no macOS, por exemplo)."""
+    daemon_threads = True
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def rodar(cfg, demo_mode):
     Servidor.token = cfg.get("token") or ""
     Servidor.demo = demo_mode
@@ -763,7 +774,7 @@ def rodar(cfg, demo_mode):
     # sem ele, responde em todas, como antes
     host = str(cfg.get("host") or "0.0.0.0")
     try:
-        srv = ThreadingHTTPServer((host, porta), Handler)
+        srv = ServidorHTTP((host, porta), Handler)
     except OSError as e:
         if host != "0.0.0.0":
             sys.exit(f"Could not listen on {host}:{porta} ({e}). Is this computer still on that network"
@@ -817,6 +828,10 @@ def main():
         LOG_STDERR = True
         if USO_LIGADO and not demo_mode:
             atualizar_uso()
+        if not sys.stdout.isatty():
+            # redirecionado (arquivo, outro programa): UTF-8 em qualquer sistema; no
+            # Windows o padrao seria a pagina de codigo, que nao tem todos os caracteres
+            sys.stdout.reconfigure(encoding="utf-8")
         print(json.dumps(montar_estado(demo_mode=demo_mode), ensure_ascii=False, indent=2))
         return
     tem, porta = opcao(args, "--port", "--porta")
