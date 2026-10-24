@@ -114,7 +114,16 @@ end
 package.preload["ui/widget/notification"] = function()
     return { SOURCE_ALWAYS_SHOW = 0x8000, notify = function(_, t) print("  [aviso] " .. t) end }
 end
-package.preload["ui/widget/inputdialog"] = function() return { new = function() return {} end } end
+-- o dialogo de texto: guarda o ultimo aberto; o teste escreve em `texto` e aperta os botoes
+local ultimo_dialogo
+package.preload["ui/widget/inputdialog"] = function()
+    return { new = function(_, o)
+        o.getInputText = function(self) return self.texto or self.input end
+        o.onShowKeyboard = function() end
+        ultimo_dialogo = o
+        return o
+    end }
+end
 -- como no KOReader: guarda a tabela do primeiro registro e ignora os seguintes
 local acoes = {}
 package.preload["dispatcher"] = function()
@@ -230,6 +239,20 @@ confere(idioma.text_func() == "Language: English", "item do idioma: " .. idioma.
 confere(acoes.claudinho_painel.title == "Claudinho: open the panel", "nome do gesto tambem muda")
 item(idioma, 2).callback()          -- Portugues
 confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "volta para portugues")
+-- o plugin do zip dos Releases vem sem config.lua: endereco e token pelo menu
+local conexao = item(itens.claudinho, 6)
+local redesenhou = 0
+local menu_aberto = { updateItems = function() redesenhou = redesenhou + 1 end }
+conexao.sub_item_table[1].callback(menu_aberto)
+ultimo_dialogo.texto = "  http://192.168.0.10:8787/estado.json "
+ultimo_dialogo.buttons[1][2].callback()            -- Salvar
+confere(p:url() == "http://192.168.0.10:8787/estado.json" and redesenhou == 1
+    and conexao.sub_item_table[1].text_func() == "Endereço: http://192.168.0.10:8787/estado.json",
+    "endereco pelo menu: salva sem os espacos, e o item mostra o novo na hora")
+conexao.sub_item_table[2].callback(menu_aberto)
+ultimo_dialogo.texto = "abc123"
+ultimo_dialogo.buttons[1][2].callback()
+confere(p:token() == "abc123", "token pelo menu: salva")
 p.settings:saveSetting("url", URL)
 p.settings:saveSetting("token", TOKEN)
 p:onReaderReady()

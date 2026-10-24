@@ -28,11 +28,21 @@ luajit tools/harness/imagens.lua /tmp        # em portugues
 luajit tools/harness/imagens.lua /tmp en     # em ingles
 ```
 
-O `fumaca.lua` confere: menu registrado, linha do topo no ReaderView (centralizada, pílula preta pedindo permissão), leitura em subprocesso, refresh só da faixa da linha, o toque na linha abrindo o painel (e o toque fora dela seguindo para o menu), o aviso de permissão (uma vez por pedido, nada com a opção desligada ou com o painel aberto), a busca (o intervalo de cada estado no adaptativo, os tempos fixos como escolha única no menu, e a próxima busca agendada com o estado novo), desligar e ligar a linha, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, a margem de cima reservada (sem mexer na que o livro grava, abaixo do cabeçalho do livro, e de volta ao desligar), "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
+O `fumaca.lua` confere: menu registrado, endereço e token pelo menu (como no plugin do zip, sem `config.lua`), linha do topo no ReaderView (centralizada, pílula preta pedindo permissão), leitura em subprocesso, refresh só da faixa da linha, o toque na linha abrindo o painel (e o toque fora dela seguindo para o menu), o aviso de permissão (uma vez por pedido, nada com a opção desligada ou com o painel aberto), a busca (o intervalo de cada estado no adaptativo, os tempos fixos como escolha única no menu, e a próxima busca agendada com o estado novo), desligar e ligar a linha, painel girado, animação só na região do mascote, refresh completo a cada 10 minutos com o painel parado, toque fecha, a margem de cima reservada (sem mexer na que o livro grava, abaixo do cabeçalho do livro, e de volta ao desligar), "sem sinal" depois de 3 falhas e, simulando um Kindle, o protetor de tela devolvido depois de um travamento.
 
 O `testes_pc.py` também confere, com históricos falsos, que um Esc ou uma permissão recusada tiram a sessão do "Te chamando!", e que os comandos gravados para o PowerShell (Windows sem Git Bash) usam `&` e barras normais. Esses comandos não foram rodados num Windows de verdade.
 
 O uso da conta é testado contra uma Anthropic de mentira (um servidor local; `CLAUDINHO_USO_URL` e `CLAUDINHO_TOKEN_URL` trocam os endereços), com um `.credentials.json` falso no HOME de teste: token válido (só consulta), vencido (renova como o Claude Code, grava só o `claudeAiOauth`, faz backup, mantém as permissões), recusado antes de vencer (renova e tenta de novo), renovação recusada (volta para a statusLine e pede `/login`), sem login e com `"uso_da_conta": false`.
+
+## Publicar uma versão
+
+O plugin pronto para baixar (para quem não usa git) sai do workflow `.github/workflows/release.yml`. Ele roda quando uma tag `v*` chega ao GitHub:
+
+1. Suba a versão em `VERSAO`, no `kindle/claudinho.koplugin/main.lua` (aparece em Claudinho → Sobre), e faça o commit.
+2. `git tag v1.5 && git push origin v1.5`.
+
+O workflow confere se a tag bate com o `VERSAO`, monta `claudinho.koplugin-v1.5.zip` a partir do repositório (sem o `config.lua`, que tem o endereço e o token de quem rodou o setup) e cria o Release com o texto de `.github/release-notes.md`. O GitHub junta o **Source code (zip)** sozinho.
+
 ## Regerar sprites e fontes
 
 ```sh

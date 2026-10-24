@@ -1,0 +1,57 @@
+# Publica o plugin pronto para baixar: ao enviar uma tag de versao (v1.4, v1.5...),
+# monta claudinho.koplugin-<tag>.zip e cria o Release com ele.
+#
+#     git tag v1.4 && git push origin v1.4
+#
+# A tag tem que bater com o VERSAO do kindle/claudinho.koplugin/main.lua.
+name: Release do plugin
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confere a versao
+        run: |
+          versao=$(sed -n 's/^local VERSAO = "\(.*\)"/\1/p' kindle/claudinho.koplugin/main.lua)
+          if [ "v$versao" != "$GITHUB_REF_NAME" ]; then
+            echo "A tag $GITHUB_REF_NAME nao bate com VERSAO = \"$versao\" no main.lua" >&2
+            exit 1
+          fi
+
+      - name: Monta o zip do plugin
+        run: |
+          zip="claudinho.koplugin-$GITHUB_REF_NAME.zip"
+          # a licenca MIT (com o aviso do kindle-claude) vai junto em toda copia
+          cp LICENSE kindle/claudinho.koplugin/LICENSE
+          # o config.lua tem o endereco e o token de quem rodou o setup: nunca vai no zip
+          (cd kindle && zip -r -X "../$zip" claudinho.koplugin -x "claudinho.koplugin/config.lua")
+          lista=$(unzip -l "$zip")
+          echo "$lista"
+          for arquivo in main.lua _meta.lua LICENSE; do
+            if ! grep -q "claudinho.koplugin/$arquivo" <<< "$lista"; then
+              echo "O zip ficou sem o $arquivo" >&2
+              exit 1
+            fi
+          done
+          if grep -q "config.lua" <<< "$lista"; then
+            echo "O zip nao pode levar o config.lua" >&2
+            exit 1
+          fi
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Publica o Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" \
+            --title "Claudinho $GITHUB_REF_NAME" \
+            --notes-file .github/release-notes.md

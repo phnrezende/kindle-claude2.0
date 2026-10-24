@@ -388,6 +388,8 @@ ok(set(cfg) == {"porta", "token"} and cfg["porta"] == 8799, "config.json so com 
 ok("StopFailure" in settings["hooks"] and "statusLine" in settings, "hooks e statusLine instalados")
 lua = open(os.path.join(tmp, "kindle", "claudinho.koplugin", "config.lua")).read()
 ok("http://127.0.0.1:8799/estado.json" in lua and "modo" not in lua, "config.lua do plugin")
+ok("Address: http://127.0.0.1:8799/estado.json" in r.stdout and f"Token:   {cfg['token']}" in r.stdout,
+   "mostra o endereco e o token para o menu do Kindle (plugin do zip dos Releases)")
 r = subprocess.run([sys.executable, "-I", os.path.join(PC, "setup.py"), "--sem-perguntas", "--porta"],
                    capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
 ok(r.returncode != 0 and "Missing value" in r.stderr, "setup: --porta sem valor da erro claro")

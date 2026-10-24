@@ -116,7 +116,17 @@ Mudou o IP ou a porta? `python3 pc/setup.py connection` e copie o plugin de novo
 3. Ejete e abra o KOReader. O menu **Claudinho (Claude Code)** aparece em **Ferramentas**.
 4. Para conferir: **Claudinho → Conexão → Testar a conexão agora**.
 
-Também dá para configurar tudo pelo menu, sem o `config.lua`: **Conexão → Endereço** e **Token**.
+Também dá para configurar tudo pelo menu, sem o `config.lua`: **Conexão → Endereço** e **Token**. O setup mostra os dois no fim.
+
+### Sem git: o plugin pronto
+
+Cada versão tem um [Release](https://github.com/phnrezende/kindle-claude2.0/releases) com o plugin em `claudinho.koplugin-vX.Y.zip` (sem `config.lua`) e o projeto inteiro em **Source code (zip)**:
+
+1. No computador, descompacte o **Source code (zip)** e rode o setup como acima. No fim, ele mostra o **endereço** e o **token** para o Kindle.
+2. No Kindle, descompacte o `claudinho.koplugin-vX.Y.zip` dentro de `koreader/plugins/` (fica `koreader/plugins/claudinho.koplugin/main.lua`).
+3. No KOReader, em **Claudinho → Conexão**, preencha **Endereço** e **Token**, e use **Testar a conexão agora**.
+
+Para atualizar, substitua a pasta `claudinho.koplugin` inteira: o endereço e o token ficam nas configurações do KOReader.
 
 ### Testar sem o Kindle
 
@@ -178,6 +188,7 @@ kindle-claude2.0/
 │   ├── gerar_sprites.py     design/sprites.json -> sprites.lua
 │   └── gerar_fontes.py      fontes variáveis -> pesos estáticos
 ├── design/                  sprites e pixel art do Claudinho chef (do original)
+├── .github/                 workflow que publica o zip do plugin a cada tag de versão
 └── docs/
 ```
 

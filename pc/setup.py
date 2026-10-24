@@ -307,6 +307,10 @@ def configurar_conexao():
 Done. Now:
   1. Keep this running:  python3 "{os.path.join(BASE, 'claudinho.py')}"
   2. Copy the folder "{PLUGIN}" to koreader/plugins/ on the Kindle.
+     Using the plugin zip from the GitHub Releases instead? Set these in
+     Claudinho > Connection, on the Kindle:
+       Address: {url}
+       Token:   {token}
 Tip: if this computer's IP changes, reserve a fixed IP for it on your router.
 The Kindle screens can be in English or Portuguese: Claudinho > Language, on the Kindle.""")
 

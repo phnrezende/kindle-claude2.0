@@ -701,7 +701,8 @@ function Claudinho:item_liga(texto, chave, depois)
     }
 end
 
-function Claudinho:editar(titulo, chave, atual, ajuda)
+--- `menu`: o menu aberto por baixo, redesenhado ao salvar (o item mostra o endereco).
+function Claudinho:editar(titulo, chave, atual, ajuda, menu)
     local dialogo
     dialogo = InputDialog:new{
         title = titulo,
@@ -715,6 +716,7 @@ function Claudinho:editar(titulo, chave, atual, ajuda)
                 self:salvar(chave, valor)
                 C.etag, C.falhas = nil, 0
                 self:reiniciar(0)
+                if menu then menu:updateItems() end
             end },
         } },
     }
@@ -805,15 +807,15 @@ function Claudinho:addToMainMenu(menu_items)
                 {
                     text_func = function() return L.t("menu_endereco", self:url() ~= "" and self:url() or L.t("vazio")) end,
                     keep_menu_open = true,
-                    callback = function()
-                        self:editar(L.t("endereco_titulo"), "url", self:url(), L.t("endereco_ajuda"))
+                    callback = function(menu)
+                        self:editar(L.t("endereco_titulo"), "url", self:url(), L.t("endereco_ajuda"), menu)
                     end,
                 },
                 {
                     text_func = texto_de("menu_token"),
                     keep_menu_open = true,
-                    callback = function()
-                        self:editar(L.t("menu_token"), "token", self:token(), L.t("token_ajuda"))
+                    callback = function(menu)
+                        self:editar(L.t("menu_token"), "token", self:token(), L.t("token_ajuda"), menu)
                     end,
                 },
                 {
