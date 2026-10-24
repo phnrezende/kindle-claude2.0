@@ -136,7 +136,8 @@ Nos PDFs a página é fixa: a margem não muda, e a linha pode cobrir o começo 
 
 ### Painel
 
-- Desenhado deitado em 800×600 × escala, com as posições, fontes e espaçamentos do original, e girado para a tela em pé (90° ou 270°). Em outras telas, a escala ajusta e o pixel art usa células inteiras.
+- Desenhado deitado em 800×600 × escala, com as posições, fontes e espaçamentos do original, e girado para a tela em pé (90° ou 270°). Em outras telas, a escala ajusta e o pixel art usa células inteiras. Todos os Kindles têm quase a mesma proporção do desenho (3:4): sobram no máximo 19 px em branco (Kindle básico de 11ª geração, 1,3% do lado); no Paperwhite e no Scribe, nenhum.
+- Se a tela muda com o painel aberto (o Kindle girado, ou a janela redimensionada no computador), o painel se refaz no tamanho novo: escala, rotação, centro e a área de toque para fechar.
 - Estado novo do PC: redesenha tudo, com refresh completo quando o modo muda.
 - A cada minuto: só a coluna da esquerda (relógio, data e "há X min").
 - A cada 10 trocas (estados novos e minutos), um refresh completo limpa os fantasmas do e-ink. Os minutos contam porque, com o Claude parado, não chega estado novo, mas a animação continua: o painel na mesa leva um refresh completo a cada 10 minutos.

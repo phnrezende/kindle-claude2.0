@@ -550,6 +550,99 @@ p.linha_pintada = nil
 pagina()
 confere(p.linha_pintada ~= nil, "com o erro corrigido, a linha volta")
 
+print("6b. todas as telas: o painel e a linha do topo em cada modelo, em pe e deitado")
+-- a tela simulada passa a ter o tamanho de cada modelo (o scaleBySize do KOReader
+-- tambem e relativo ao lado menor, sobre 600)
+local function usar_tela(w, h)
+    Screen.getWidth = function() return w end
+    Screen.getHeight = function() return h end
+    Screen.scaleBySize = function(_, px) return math.ceil(px * math.min(w, h) / 600) end
+end
+local function sobra_branca(painel)
+    local tw, th = painel.tela:getWidth(), painel.tela:getHeight()
+    return (painel.dimen.w - tw) + (painel.dimen.h - th), tw, th
+end
+local MODELOS = {
+    { "kindle-basico-10", 600, 800 }, { "kindle-basico-11", 1072, 1448 }, { "paperwhite-11-12", 1236, 1648 },
+    { "oasis-colorsoft", 1264, 1680 }, { "scribe", 1860, 2480 }, { "kobo-clara", 1072, 1448 },
+}
+local salvas = 0
+-- o painel de referencia (800x600, escala 1): os outros, reduzidos, tem que bater com ele
+local referencia
+local function diferenca(canvas)
+    local cw, ch = canvas:getWidth(), canvas:getHeight()
+    local rw, rh = referencia:getWidth(), referencia:getHeight()
+    local diferentes, total = 0, 0
+    for gy = 0, 149 do
+        for gx = 0, 199 do
+            local a = referencia:getPixel(math.floor((gx + 0.5) * rw / 200), math.floor((gy + 0.5) * rh / 150)):getColor8().a
+            local b = canvas:getPixel(math.floor((gx + 0.5) * cw / 200), math.floor((gy + 0.5) * ch / 150)):getColor8().a
+            if math.abs(a - b) > 128 then diferentes = diferentes + 1 end
+            total = total + 1
+        end
+    end
+    return diferentes / total
+end
+for _, m in ipairs(MODELOS) do
+    local nome, w, h = m[1], m[2], m[3]
+    for _, orient in ipairs({ { "em-pe", w, h }, { "deitado", h, w } }) do
+        local sw, sh = orient[2], orient[3]
+        usar_tela(sw, sh)
+        p:abrir_painel()
+        local painel = pilha[#pilha]
+        local sobra, tw, th = sobra_branca(painel)
+        local lado = math.max(sw, sh)
+        confere(painel.dimen.w == sw and painel.dimen.h == sh and tw <= sw and th <= sh and sobra <= lado * 0.02,
+            string.format("%s %s (%dx%d): painel %dx%d, sobra %d px", nome, orient[1], sw, sh, tw, th, sobra))
+        if not referencia then
+            referencia = painel.canvas:copy()
+        else
+            local dif = diferenca(painel.canvas)
+            confere(dif < 0.05, string.format("%s %s: mesmo desenho que o de 800x600, so maior (%.1f%% diferente)",
+                nome, orient[1], dif * 100))
+        end
+        if salvas < 4 and (nome == "kindle-basico-11" or nome == "scribe") then
+            local bb = BB.new(sw, sh, BB.TYPE_BB8)
+            painel:paintTo(bb, 0, 0)
+            H.salvar_pgm(bb, SAIDA .. "/modelo-" .. nome .. "-" .. orient[1] .. ".pgm")
+            bb:free()
+            salvas = salvas + 1
+        end
+        painel:onTap()
+        -- a linha do topo nessa tela: centralizada e na escala dela
+        p:onSetDimensions()
+        rodar(0)
+        local bb = BB.new(sw, sh, BB.TYPE_BB8)
+        bb:fill(BB.COLOR_WHITE)
+        leitor.view.modulo:paintTo(bb, 0, 0)
+        local rl = p:linha_retangulo(p.linha_img:getWidth())
+        local escala = Screen:scaleBySize(1000) / 1000
+        confere(math.abs(rl.x + rl.w / 2 - sw / 2) <= 1 and rl.h == math.floor(20 * escala + 0.5)
+            and p.linha_img:getHeight() == rl.h,
+            string.format("%s %s: linha centralizada, %dx%d", nome, orient[1], rl.w, rl.h))
+        bb:free()
+    end
+end
+-- a tela muda com o painel aberto (janela redimensionada, ou o Kindle girado)
+usar_tela(600, 800)
+p:onSetDimensions()
+rodar(0)
+p:abrir_painel()
+local painel_aberto = pilha[#pilha]
+usar_tela(1072, 1448)
+painel_aberto:onSetDimensions()
+local sobra2, tw2, th2 = sobra_branca(painel_aberto)
+confere(painel_aberto.dimen.w == 1072 and tw2 <= 1072 and th2 <= 1448 and sobra2 <= 1448 * 0.02,
+    string.format("tela muda com o painel aberto: ele se refaz (%dx%d, sobra %d px)", tw2, th2, sobra2))
+confere(painel_aberto.ges_events.Tap[1].range.w == 1072, "e o toque para fechar vale na tela nova toda")
+usar_tela(1448, 1072)                                  -- girou para deitado
+painel_aberto:onSetDimensions()
+confere(painel_aberto.rot == 0 and painel_aberto.tela:getWidth() <= 1448, "girou com o painel aberto: fica deitado")
+painel_aberto:onTap()
+usar_tela(TELA_W, TELA_H)
+p:onSetDimensions()
+rodar(0)
+
 print("7. Kindle: o protetor de tela volta mesmo se o KOReader fechar com o painel aberto")
 local executar = os.execute
 local lipc = {}

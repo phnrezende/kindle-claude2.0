@@ -39,6 +39,20 @@ local Painel = InputContainer:extend{
 }
 
 function Painel:init()
+    self.trocas = 0
+    if Device:hasKeys() then
+        self.key_events.Fechar = { { Device.input.group.Back } }
+    end
+    self.tarefa_quadro = function() self:proximo_quadro() end
+    self.tarefa_minuto = function() self:minuto() end
+    self:montar()
+    self:redesenhar()
+end
+
+--- Mede a tela e prepara o desenho para ela: escala, rotacao, centro e a area de
+--- toque. Chamado ao abrir e de novo quando a tela muda (janela redimensionada no
+--- computador, ou o Kindle girado com o painel aberto).
+function Painel:montar()
     local sw, sh = Screen:getWidth(), Screen:getHeight()
     self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
     self.rot = (sw >= sh) and 0 or self.rotacao
@@ -47,23 +61,26 @@ function Painel:init()
     local k = math.min(larg / D.W, alt / D.H)
     self.desenho = D.novo(Blitbuffer, RenderText, self.fonte, sprites, k)
     self.cw, self.ch = self.desenho:px(D.W), self.desenho:px(D.H)
+    if self.canvas then self.canvas:free() end
     self.canvas = Blitbuffer.new(self.cw, self.ch, Blitbuffer.TYPE_BB8)
     local tw, th = self.cw, self.ch
     if self.rot ~= 0 then tw, th = self.ch, self.cw end
     self.ox, self.oy = math.floor((sw - tw) / 2), math.floor((sh - th) / 2)
-    self.trocas = 0
-
     if Device:isTouchDevice() then
         self.ges_events.Tap = { GestureRange:new{ ges = "tap", range = self.dimen } }
     end
-    if Device:hasKeys() then
-        self.key_events.Fechar = { { Device.input.group.Back } }
-    end
-
-    self.tarefa_quadro = function() self:proximo_quadro() end
-    self.tarefa_minuto = function() self:minuto() end
-    self:redesenhar()
 end
+
+--- A tela mudou de tamanho ou girou: monta tudo de novo para o tamanho novo.
+function Painel:onSetDimensions()
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
+    if self.dimen and self.dimen.w == sw and self.dimen.h == sh then return end
+    self:montar()
+    self:redesenhar()
+    self.trocas = 0
+    UIManager:setDirty(self, function() return "full", self.dimen end)
+end
+Painel.onScreenResize = Painel.onSetDimensions
 
 -- ------------------------------------------------------------------ canvas -> tela
 

@@ -35,7 +35,7 @@ local json = require("claudinho/json")
 local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
-local VERSAO = "1.5"
+local VERSAO = "1.6"
 
 local PADRAO = {
     overlay = true,                -- a linha "Claude ●○○ 75%" no topo da pagina
@@ -139,9 +139,11 @@ function Claudinho:fonte()
         mono400 = self:arquivo_fonte("JetBrainsMono-Regular.ttf"),
         mono700 = self:arquivo_fonte("JetBrainsMono-Bold.ttf"),
     }
-    -- o Font:getFace escala o tamanho pela tela; aqui queremos o pixel exato
-    local s = Screen:scaleBySize(1000) / 1000
+    -- o Font:getFace escala o tamanho pela tela; aqui queremos o pixel exato. A escala
+    -- e lida a cada fonte: a tela pode ter mudado de tamanho desde a ultima (janela
+    -- redimensionada no computador), e uma escala velha deixaria o texto do tamanho errado
     self._fonte = function(nome, px)
+        local s = Screen:scaleBySize(1000) / 1000
         local alvo = math.max(1, math.floor(px + 0.5))
         local tam = (alvo - 0.5) / s
         return Font:getFace(arquivos[nome], tam) or Font:getFace("cfont", tam)
@@ -588,6 +590,21 @@ function Claudinho:onSetPageMargins()
             if not self.fechado then self:reservar_espaco() end
         end)
     end
+end
+
+--- A tela mudou de tamanho ou girou: a linha e refeita na escala nova, e o espaco
+--- dela na margem e reservado de novo (o painel aberto se refaz sozinho).
+function Claudinho:onSetDimensions()
+    if not self.leitor or self.fechado then return end
+    if self.linha_img then
+        self.linha_img:free()
+        self.linha_img, self.linha_chave = nil, nil
+    end
+    UIManager:nextTick(function()
+        if self.fechado then return end
+        self:reservar_espaco()
+        self:atualizar_linha(true)
+    end)
 end
 
 function Claudinho:onSuspend()
