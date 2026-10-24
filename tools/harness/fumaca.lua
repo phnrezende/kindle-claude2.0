@@ -227,9 +227,9 @@ confere(arq ~= nil and fonte:match("^%.%./") ~= nil,
     "caminho da fonte sobe ate a raiz (o getFace do KOReader 2026.07 poe ./fonts/ na frente) e abre")
 local itens = {}
 p:addToMainMenu(itens)
-confere(itens.claudinho and #itens.claudinho.sub_item_table == 8, "menu com 8 itens")
+confere(itens.claudinho and #itens.claudinho.sub_item_table == 9, "menu com 9 itens")
 local function item(t, n) return t.sub_item_table[n] end
-local idioma = item(itens.claudinho, 7)
+local idioma = item(itens.claudinho, 8)
 require("claudinho/textos").escolher("pt")
 confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "menu em portugues")
 item(idioma, 3).callback()          -- English
@@ -240,7 +240,7 @@ confere(acoes.claudinho_painel.title == "Claudinho: open the panel", "nome do ge
 item(idioma, 2).callback()          -- Portugues
 confere(item(itens.claudinho, 1).text_func() == "Abrir o painel", "volta para portugues")
 -- o plugin do zip dos Releases vem sem config.lua: endereco e token pelo menu
-local conexao = item(itens.claudinho, 6)
+local conexao = item(itens.claudinho, 7)
 local redesenhou = 0
 local menu_aberto = { updateItems = function() redesenhou = redesenhou + 1 end }
 conexao.sub_item_table[1].callback(menu_aberto)
@@ -400,7 +400,7 @@ confere(intervalo_em("cozinhando") == 30, "adaptativo, trabalhando: 30 s")
 confere(intervalo_em("chamando") == 30, "adaptativo, pedindo permissao: 30 s")
 confere(intervalo_em("prato") == 60, "adaptativo, acabou de terminar: 1 min")
 confere(intervalo_em("descansando") == 180, "adaptativo, parado: 3 min")
-local lendo = item(item(itens.claudinho, 5), 1)
+local lendo = item(item(itens.claudinho, 6), 1)
 local opcoes = {}
 for _, it in ipairs(lendo.sub_item_table) do opcoes[#opcoes + 1] = it.text_func() end
 confere(#opcoes == 5 and opcoes[1]:find("Adaptativo", 1, true) and lendo.sub_item_table[1].radio,
@@ -431,6 +431,51 @@ local proxima
 for _, t in ipairs(tarefas) do if t.f == p.tarefa then proxima = t.t - relogio end end
 confere(proxima and proxima > 25 and proxima <= 30,
     "depois da resposta, agenda com o estado novo (" .. tostring(proxima) .. " s)")
+
+print("4b4. pausar: nada usa a rede")
+local function agendada()
+    for _, t in ipairs(tarefas) do if t.f == p.tarefa then return true end end
+    return false
+end
+local pausar = item(itens.claudinho, 2)
+confere(pausar.text_func() == "Pausar (não busca nada, poupa bateria)" and not pausar.checked_func(),
+    "item 'Pausar' no menu, desmarcado")
+pausar.callback({ updateItems = function() end })
+confere(p:opt("pausado") == true and pausar.checked_func(), "marcado: fica pausado")
+confere(not p:precisa_buscar() and not agendada(), "pausado: nenhuma busca agendada")
+p:onResume()
+p:onNetworkConnected()
+confere(not agendada(), "nem ao acordar, nem quando o Wi-Fi conecta")
+confere(p:linha_alvo() == nil, "a linha do topo some")
+pagina()
+local topo_limpo = true
+for x = 0, TELA_W - 1, 2 do
+    if tela:getPixel(x, 14):getColor8().a < 0xF0 then topo_limpo = false end
+end
+confere(topo_limpo, "nada desenhado no topo")
+confere(p:margem_necessaria({ 10, 15, 10, 15 }) == nil, "e nao reserva espaco: a sua margem volta")
+local avisos_antes = avisos()
+chega("chamando", os.time() + 100, "Bash", "rm -rf x")
+confere(avisos() == avisos_antes, "pedido de permissao que ja estava a caminho: nao avisa")
+local n_msg3 = #mensagens
+p:abrir_painel()
+confere(p.painel == nil and #mensagens == n_msg3 + 1 and mensagens[#mensagens]:find("pausado", 1, true) ~= nil,
+    "o painel nao abre, e diz que esta pausado")
+confere(not item(itens.claudinho, 1).enabled_func(), "'Abrir o painel' fica desativado no menu")
+confere(zona.handler({ ges = "tap", pos = Geom:new{ x = TELA_W / 2, y = 14, w = 0, h = 0 } }) == false,
+    "toque no topo segue para o menu (nao ha linha)")
+p:mudar("intervalo_leitura", 30)
+confere(not agendada(), "mudar outras opcoes nao volta a buscar")
+p:mudar("intervalo_leitura", "adaptativo")
+confere(acoes.claudinho_pausar and acoes.claudinho_pausar.event == "ClaudinhoPausar", "gesto 'pausar/retomar' registrado")
+p:onClaudinhoPausar()                                  -- o gesto retoma
+confere(p:opt("pausado") == false and agendada() and p:linha_alvo() ~= nil, "retomado: busca de novo e a linha volta")
+p:abrir_painel()
+confere(p.painel ~= nil, "e o painel abre")
+p:onClaudinhoPausar()                                  -- pausar com o painel aberto
+confere(p.painel == nil and p:opt("pausado") and not agendada(), "pausar com o painel aberto: fecha o painel e para")
+p:onClaudinhoPausar()
+rodar(3)                                               -- a busca de quando retomou termina aqui
 
 print("4c. espaco para a linha: so a margem de cima sobe")
 leitor.rolling, leitor.view.view_mode = {}, "page"

@@ -65,9 +65,14 @@ local TEXTOS = {
         overlay_desligado = "Status do Claude no topo da página desligado",
         gesto_painel = "Claudinho: abrir o painel",
         gesto_overlay = "Claudinho: ligar/desligar o status no topo",
+        gesto_pausar = "Claudinho: pausar/retomar",
+        pausado_sim = "Claudinho pausado: nenhuma busca até você retomar",
+        pausado_nao = "Claudinho retomado",
+        pausado_painel = "O Claudinho está pausado.\n\nPara ver o painel, desmarque Claudinho → Pausar.",
 
         -- menu
         menu_abrir = "Abrir o painel",
+        menu_pausar = "Pausar (não busca nada, poupa bateria)",
         menu_linha = "Mostrar o status no topo da página",
         menu_aviso = "Avisar quando o Claude te chamar",
         aviso_chamando = "O Claude está te chamando.\n\n%s",
@@ -161,8 +166,13 @@ local TEXTOS = {
         overlay_desligado = "Claude status at the top of the page off",
         gesto_painel = "Claudinho: open the panel",
         gesto_overlay = "Claudinho: toggle the status at the top",
+        gesto_pausar = "Claudinho: pause/resume",
+        pausado_sim = "Claudinho paused: no fetching until you resume",
+        pausado_nao = "Claudinho resumed",
+        pausado_painel = "Claudinho is paused.\n\nTo see the panel, uncheck Claudinho → Pause.",
 
         menu_abrir = "Open the panel",
+        menu_pausar = "Pause (no fetching, saves battery)",
         menu_linha = "Show the status at the top of the page",
         menu_aviso = "Alert me when Claude calls you",
         aviso_chamando = "Claude is calling you.\n\n%s",

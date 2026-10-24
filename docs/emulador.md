@@ -66,6 +66,7 @@ EMULATE_READER_W=600 EMULATE_READER_H=800 EMULATE_READER_FLASH=1 ./koreader-*.Ap
 | Voltar | clique em qualquer lugar do painel | volta para o livro |
 | Sem sinal | pare o agente e espere 3 buscas | linha cinza, sem bolinha cheia e com "--"; painel "Sem sinal do PC" |
 | Desligar a linha | Claudinho → Mostrar o status no topo da página | a linha some e o texto sobe para a sua margem; ligando de novo, desce |
+| Pausar | Claudinho → Pausar | a linha some, "Abrir o painel" fica desativado e o agente não recebe mais buscas; desmarcando, tudo volta |
 
 Livros para testar: qualquer EPUB de domínio público, por exemplo do [Projeto Gutenberg](https://www.gutenberg.org/).
 

@@ -96,6 +96,7 @@ O agente responde em todas as redes em que o computador estiver. Para responder 
 ### Buscas
 
 - Com o painel aberto, a cada **30 s** (configurável). Na biblioteca, sem painel, não busca nada.
+- **Pausado** (Claudinho → Pausar, ou o gesto "pausar/retomar"), não busca nada: nem lendo, nem com o painel, nem ao acordar ou quando o Wi-Fi conecta. A linha some (e a margem de cima volta à sua), o aviso de permissão não aparece e o painel não abre. A pausa fica gravada e vale até você retomar. O plugin não liga nem desliga o Wi-Fi: para poupar o máximo, desligue o Wi-Fi do Kindle também.
 - Lendo, em **Atualizar a cada → Lendo** você escolhe uma coisa só: **adaptativo** (o padrão) ou um tempo fixo (30 s, 1, 2 ou 5 min).
 - O **adaptativo** segue o que o Claude está fazendo: trabalhando ou pedindo permissão, a cada 30 s, para o aviso de permissão chegar antes; logo depois de terminar, 1 min; parado, 3 min (abaixo dos 10 min que viram "sem sinal"); sem sinal do PC, 2, 4, 8 e então 10 min, dobrando a cada falha: com o PC desligado à noite, o Kindle quase não liga o Wi-Fi.
 - Como o intervalo depende do estado novo, a próxima busca é agendada quando a resposta chega (o agendamento feito antes da busca fica de reserva, caso ela não volte).

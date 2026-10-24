@@ -35,11 +35,12 @@ local json = require("claudinho/json")
 local L = require("claudinho/textos")
 local sprites = require("claudinho/sprites")
 
-local VERSAO = "1.4"
+local VERSAO = "1.5"
 
 local PADRAO = {
     overlay = true,                -- a linha "Claude ●○○ 75%" no topo da pagina
     aviso_chamando = true,         -- aviso na pagina quando o Claude pede sua permissao
+    pausado = false,               -- pausa tudo: nenhuma busca, sem linha, sem aviso, sem painel
     intervalo_leitura = "adaptativo", -- enquanto le: "adaptativo" (ver Claudinho:intervalo) ou segundos fixos
     intervalo_painel = 30,         -- segundos entre buscas com o painel aberto
     painel_rotacao = 90,           -- 90: logo "kindle" a esquerda; 270: a direita
@@ -175,7 +176,7 @@ function Claudinho:vista()
 end
 
 function Claudinho:precisa_buscar()
-    if self.fechado or self.suspenso then return false end
+    if self.fechado or self.suspenso or self:opt("pausado") then return false end
     return self.painel ~= nil or (self.leitor and (self:opt("overlay") or self:opt("aviso_chamando")))
 end
 
@@ -298,7 +299,7 @@ end
 --- "desde" muda a cada pedido novo). Com o painel aberto nao avisa, porque ele ja
 --- mostra "Te chamando!", e esse pedido conta como visto.
 function Claudinho:avisar_chamando()
-    if not self.leitor or self.fechado then return end
+    if not self.leitor or self.fechado or self:opt("pausado") then return end
     local v = self:vista()
     if v.grupo ~= "aprovacao" then return end
     local pedido = tostring(type(C.dados) == "table" and C.dados.desde or nil)
@@ -333,7 +334,7 @@ end
 
 --- O que a linha mostra agora (nil se desligada) e uma chave que muda junto com ela.
 function Claudinho:linha_alvo()
-    if not self:opt("overlay") then return nil end
+    if not self:opt("overlay") or self:opt("pausado") then return nil end
     local info = E.linha_topo(self:vista())
     return info, string.format("%s|%s|%d", tostring(info.estado), info.pct, info.agentes)
 end
@@ -436,7 +437,7 @@ end
 function Claudinho:margem_necessaria(m)
     local typeset = self.ui and self.ui.rolling and self.ui.typeset
     m = m or (typeset and typeset.unscaled_margins)
-    if type(m) ~= "table" or not self:opt("overlay") then return nil end
+    if type(m) ~= "table" or not self:opt("overlay") or self:opt("pausado") then return nil end
     local r = self:linha_retangulo()
     local cab = self:cabecalho()
     local fim = r.y + r.h + math.floor(LINHA_RESPIRO * escala() + 0.5)
@@ -520,6 +521,10 @@ end
 
 function Claudinho:abrir_painel()
     if self.painel then return end
+    if self:opt("pausado") then
+        UIManager:show(InfoMessage:new{ text = L.t("pausado_painel"), timeout = 5 })
+        return
+    end
     local Painel = require("claudinho/painel")
     self:manter_acordado(true)
     local ok, painel = pcall(Painel.new, Painel, {
@@ -623,8 +628,9 @@ end
 -- mesmo nome); trocar o title nelas e o que atualiza o nome do gesto ao mudar o idioma.
 local ACOES = {
     { "claudinho_painel", { category = "none", event = "ClaudinhoPainel", general = true }, "gesto_painel" },
-    { "claudinho_overlay", { category = "none", event = "ClaudinhoOverlay", general = true, separator = true },
-        "gesto_overlay" },
+    { "claudinho_overlay", { category = "none", event = "ClaudinhoOverlay", general = true }, "gesto_overlay" },
+    { "claudinho_pausar", { category = "none", event = "ClaudinhoPausar", general = true, separator = true },
+        "gesto_pausar" },
 }
 
 function Claudinho:onDispatcherRegisterActions()
@@ -642,6 +648,23 @@ end
 function Claudinho:onClaudinhoOverlay()
     self:alternar_overlay()
     return true
+end
+
+function Claudinho:onClaudinhoPausar()
+    self:pausar(not self:opt("pausado"))
+    return true
+end
+
+--- Pausa (ou retoma) tudo: nenhuma busca (nem lendo, nem com o painel, nem ao acordar),
+--- sem linha do topo (a sua margem volta), sem aviso e sem painel. Para a bateria no
+--- fim, ou o PC desligado: nada usa a rede ate voce retomar. Fica gravado.
+function Claudinho:pausar(sim)
+    self:salvar("pausado", sim)
+    if sim and self.painel then UIManager:close(self.painel) end
+    Notification:notify(L.t(sim and "pausado_sim" or "pausado_nao"), Notification.SOURCE_ALWAYS_SHOW)
+    self:lugar_mudou()
+    self:atualizar_linha(true)
+    self:reiniciar(0)
 end
 
 function Claudinho:alternar_overlay()
@@ -785,9 +808,19 @@ function Claudinho:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text_func = texto_de("menu_abrir"),
+                enabled_func = function() return not self:opt("pausado") end,
                 callback = function()
                     -- o menu fecha logo depois deste callback; abre o painel em seguida
                     UIManager:nextTick(function() self:abrir_painel() end)
+                end,
+            },
+            {
+                text_func = texto_de("menu_pausar"),
+                checked_func = function() return self:opt("pausado") end,
+                keep_menu_open = true,
+                callback = function(menu)
+                    self:pausar(not self:opt("pausado"))
+                    if menu then menu:updateItems() end
                 end,
                 separator = true,
             },
