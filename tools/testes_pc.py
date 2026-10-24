@@ -7,6 +7,13 @@ mexem no seu ~/.claude nem no seu config.json. Usa a porta 8799.
 """
 import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
+# O teste le e escreve os arquivos do agente (settings.json, state.json...), que sao
+# UTF-8. Ate o Python 3.14 o padrao no Windows e a pagina de codigo (cp1252), e um
+# caminho com acento viraria lixo so do lado do teste. Entao o teste roda em modo
+# UTF-8; os scripts testados continuam no padrao do sistema (rodam com -I, como no uso real).
+if not sys.flags.utf8_mode:
+    sys.exit(subprocess.run([sys.executable, "-X", "utf8", os.path.abspath(__file__)] + sys.argv[1:]).returncode)
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 tmp = tempfile.mkdtemp()
 # sem o config.json e os dados de quem roda os testes
